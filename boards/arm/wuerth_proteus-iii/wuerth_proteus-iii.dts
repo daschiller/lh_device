@@ -12,7 +12,8 @@
 		zephyr,console = &uart0;
 		zephyr,sram = &sram0;
 		zephyr,flash = &flash0;
-		zephyr,code-partition = &flash_partition;
+		zephyr,code-partition = &code_partition;
+		zephyr,storage-partition = &storage_partition;
 	};
 };
 
@@ -30,9 +31,13 @@
 		#address-cells = <1>;
 		#size-cells = <1>;
 
-		flash_partition: partition@0 {
-			label = "flash";
-			reg = <0x0 DT_SIZE_K(1024)>;
+		code_partition: partition@0 {
+			label = "code";
+			reg = <0x0 DT_SIZE_K(1016)>;
+		};
+		storage_partition: partition@fe000 {
+			label = "storage";
+			reg = <DT_SIZE_K(1016) DT_SIZE_K(8)>;
 		};
 	};
 };
