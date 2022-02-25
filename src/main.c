@@ -10,7 +10,7 @@
 #include <bluetooth/uuid.h>
 #include <drivers/pwm.h>
 #include <logging/log.h>
-#include <pm/pm.h>
+#include <pm/device.h>
 #include <settings/settings.h>
 
 LOG_MODULE_REGISTER(main);
@@ -143,8 +143,9 @@ void main(void) {
 
 // suspend UART
 #ifdef LOW_POWER
-    const struct device *uart_dev = DEVICE_DT_GET(DT_CHOSEN(zephyr_console));
-    err = pm_device_state_set(uart_dev, PM_DEVICE_STATE_SUSPENDED);
+        const struct device *uart_dev =
+            DEVICE_DT_GET(DT_CHOSEN(zephyr_console));
+    err = pm_device_action_run(uart_dev, PM_DEVICE_ACTION_SUSPEND);
     if (err) {
         LOG_ERR("UART suspension failed (err %d)", err);
     }
