@@ -8,6 +8,12 @@ CONFIG_BOARD_WUERTH_PROTEUS_III=y
 # Enable MPU
 CONFIG_ARM_MPU=y
 
+# Enable FPU
+# CONFIG_FPU=y
+
+# Enable pin control
+CONFIG_PINCTRL=y
+
 # Enable hardware stack protection
 CONFIG_HW_STACK_PROTECTION=y
 

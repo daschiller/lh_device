@@ -1,0 +1,3686 @@
+From 0942d7e211e124753fd9c22d62803257ac2c1c9e Mon Sep 17 00:00:00 2001
+From: Thomas Stranger <thomas.stranger@outlook.com>
+Date: Tue, 8 Mar 2022 10:12:34 +0100
+Subject: [PATCH 01/11] drivers: w1 introduce 1-wire api and common code
+
+This commit introduces a new api for the Dallas 1-wire protocol.
+The api includes link functions for read and write operations on
+bit, byte, and block level, as well as
+function to reset and lock the bus.
+
+The bus configuration is derived from the device tree and can be
+queried using w1_peripheral_count routine.
+
+Instead of master/slave terminology controller/peripheral terms are
+used to refer to bus participants.
+
+Signed-off-by: Thomas Stranger <thomas.stranger@outlook.com>
+---
+ drivers/CMakeLists.txt             |   1 +
+ drivers/Kconfig                    |   2 +
+ drivers/w1/CMakeLists.txt          |   8 +
+ drivers/w1/Kconfig                 |  25 +++
+ drivers/w1/w1_handlers.c           |  76 +++++++
+ dts/bindings/w1/w1-controller.yaml |  12 ++
+ dts/bindings/w1/w1-device.yaml     |  23 ++
+ include/drivers/w1.h               | 330 +++++++++++++++++++++++++++++
+ 8 files changed, 477 insertions(+)
+ create mode 100644 drivers/w1/CMakeLists.txt
+ create mode 100644 drivers/w1/Kconfig
+ create mode 100644 drivers/w1/w1_handlers.c
+ create mode 100644 dts/bindings/w1/w1-controller.yaml
+ create mode 100644 dts/bindings/w1/w1-device.yaml
+ create mode 100644 include/drivers/w1.h
+
+diff --git a/drivers/CMakeLists.txt b/drivers/CMakeLists.txt
+index 0aafe633fe9e..2f6870b41511 100644
+--- a/drivers/CMakeLists.txt
++++ b/drivers/CMakeLists.txt
+@@ -31,6 +31,7 @@ add_subdirectory_ifdef(CONFIG_PINMUX pinmux)
+ add_subdirectory_ifdef(CONFIG_PWM pwm)
+ add_subdirectory_ifdef(CONFIG_SENSOR sensor)
+ add_subdirectory_ifdef(CONFIG_SPI spi)
++add_subdirectory_ifdef(CONFIG_W1 w1)
+ add_subdirectory_ifdef(CONFIG_WATCHDOG watchdog)
+ add_subdirectory_ifdef(CONFIG_WIFI wifi)
+ add_subdirectory_ifdef(CONFIG_CAN can)
+diff --git a/drivers/Kconfig b/drivers/Kconfig
+index 96ef2987cf24..dd3c2dc580e3 100644
+--- a/drivers/Kconfig
++++ b/drivers/Kconfig
+@@ -53,6 +53,8 @@ source "drivers/dac/Kconfig"
+ 
+ source "drivers/watchdog/Kconfig"
+ 
++source "drivers/w1/Kconfig"
++
+ source "drivers/clock_control/Kconfig"
+ 
+ source "drivers/ptp_clock/Kconfig"
+diff --git a/drivers/w1/CMakeLists.txt b/drivers/w1/CMakeLists.txt
+new file mode 100644
+index 000000000000..f6bcdc3a5afb
+--- /dev/null
++++ b/drivers/w1/CMakeLists.txt
+@@ -0,0 +1,8 @@
++# SPDX-License-Identifier: Apache-2.0
++
++zephyr_library()
++
++zephyr_sources_ifdef(CONFIG_USERSPACE w1_handlers.c)
++
++# drivers implementing link functions (read, write, reset)
++# none implemented yet
+diff --git a/drivers/w1/Kconfig b/drivers/w1/Kconfig
+new file mode 100644
+index 000000000000..1406d68358ff
+--- /dev/null
++++ b/drivers/w1/Kconfig
+@@ -0,0 +1,25 @@
++# 1-Wire configuration options
++
++# Copyright (c) 2022 Thomas Stranger
++# SPDX-License-Identifier: Apache-2.0
++
++menuconfig W1
++	bool
++	prompt "1-Wire Drivers"
++	help
++	  Enable 1-Wire Drivers
++
++if W1
++
++module = W1
++module-str = W1
++source "subsys/logging/Kconfig.template.log_config"
++
++config W1_INIT_PRIORITY
++	int
++	default 65
++	prompt "Init priority"
++	help
++	  1-Wire device driver initialization priority.
++
++endif # W1
+diff --git a/drivers/w1/w1_handlers.c b/drivers/w1/w1_handlers.c
+new file mode 100644
+index 000000000000..d81a1ae91da9
+--- /dev/null
++++ b/drivers/w1/w1_handlers.c
+@@ -0,0 +1,76 @@
++/*
++ * Copyright (c) 2022 Thomas Stranger
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <syscall_handler.h>
++#include <drivers/w1.h>
++
++static inline int z_vrfy_w1_reset_bus(const struct device *dev)
++{
++	Z_OOPS(Z_SYSCALL_DRIVER_W1(dev, reset_bus));
++
++	return z_impl_w1_reset_bus((const struct device *)dev);
++}
++#include <syscalls/w1_reset_bus_mrsh.c>
++
++static inline int z_vrfy_w1_read_bit(const struct device *dev)
++{
++	Z_OOPS(Z_SYSCALL_DRIVER_W1(dev, read_bit));
++
++	return z_impl_w1_read_bit((const struct device *)dev);
++}
++#include <syscalls/w1_read_bit_mrsh.c>
++
++static inline int z_vrfy_w1_write_bit(const struct device *dev, bool bit)
++{
++	Z_OOPS(Z_SYSCALL_DRIVER_W1(dev, write_bit));
++
++	return z_impl_w1_write_bit((const struct device *)dev, bit);
++}
++#include <syscalls/w1_write_bit_mrsh.c>
++
++static inline int z_vrfy_w1_read_byte(const struct device *dev)
++{
++	Z_OOPS(Z_SYSCALL_DRIVER_W1(dev, read_byte));
++
++	return z_impl_w1_read_byte((const struct device *)dev);
++}
++#include <syscalls/w1_read_byte_mrsh.c>
++
++static inline int z_vrfy_w1_write_byte(const struct device *dev, uint8_t byte)
++{
++	Z_OOPS(Z_SYSCALL_DRIVER_W1(dev, write_byte));
++
++	return z_impl_w1_write_byte((const struct device *)dev, (uint8_t)byte);
++}
++#include <syscalls/w1_write_byte_mrsh.c>
++
++static inline int z_vrfy_w1_change_bus_lock(const struct device *dev, bool lock)
++{
++	Z_OOPS(Z_SYSCALL_OBJ(dev, K_OBJ_DRIVER_W1));
++
++	return z_impl_w1_change_bus_lock((const struct device *)dev, lock);
++}
++#include <syscalls/w1_change_bus_lock_mrsh.c>
++
++static inline int z_vrfy_w1_configure(const struct device *dev,
++				      enum w1_driver_settings_type type,
++				      uint32_t value)
++{
++	Z_OOPS(Z_SYSCALL_DRIVER_W1(dev, configure));
++
++	return z_impl_w1_configure(dev, type, value);
++}
++#include <syscalls/w1_configure_mrsh.c>
++
++static inline size_t z_vrfy_w1_get_peripheral_count(const struct device *dev)
++{
++	Z_OOPS(Z_SYSCALL_OBJ(dev, K_OBJ_DRIVER_W1));
++
++	return z_impl_w1_get_peripheral_count((const struct device *)dev);
++}
++#include <syscalls/w1_get_peripheral_count_mrsh.c>
++
++#include <syscalls/w1_search_bus_mrsh.c>
+diff --git a/dts/bindings/w1/w1-controller.yaml b/dts/bindings/w1/w1-controller.yaml
+new file mode 100644
+index 000000000000..b73aecc17454
+--- /dev/null
++++ b/dts/bindings/w1/w1-controller.yaml
+@@ -0,0 +1,12 @@
++# Copyright (c) 2022 Thomas Stranger
++# SPDX-License-Identifier: Apache-2.0
++
++# Common fields for W1 controllers
++
++include: base.yaml
++
++bus: w1
++
++properties:
++    label:
++      required: true
+diff --git a/dts/bindings/w1/w1-device.yaml b/dts/bindings/w1/w1-device.yaml
+new file mode 100644
+index 000000000000..128a23d6aaad
+--- /dev/null
++++ b/dts/bindings/w1/w1-device.yaml
+@@ -0,0 +1,23 @@
++# Copyright (c) 2022, Thomas Stranger
++# SPDX-License-Identifier: Apache-2.0
++
++# Common fields for W1 peripheral devices
++
++include: base.yaml
++
++on-bus: w1
++
++properties:
++    family-code:
++      type : int
++      description: |
++          8-bit 1-Wire family code, which is also part of the 64 bit ROM ID.
++    overdrive-speed:
++      type: boolean
++      description: |
++          Instead of standard speed timing, use overdrive speed timing for
++          communication.
++          The driver will automatically use OVERDRIVE_SKIP and OVERDRIVE_MATCH
++          command instead of the standard commands.
++    label:
++      required: true
+diff --git a/include/drivers/w1.h b/include/drivers/w1.h
+new file mode 100644
+index 000000000000..a8df621a7be4
+--- /dev/null
++++ b/include/drivers/w1.h
+@@ -0,0 +1,330 @@
++/*
++ * Copyright (c) 2018 Roman Tataurov <diytronic@yandex.ru>
++ * Copyright (c) 2022 Thomas Stranger
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++/**
++ * @file
++ * @brief Public 1-Wire Driver APIs
++ */
++
++#ifndef ZEPHYR_INCLUDE_DRIVERS_W1_H_
++#define ZEPHYR_INCLUDE_DRIVERS_W1_H_
++
++#include <device.h>
++#include <sys/crc.h>
++#include <zephyr/types.h>
++#include <sys/byteorder.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/**
++ * @brief 1-Wire Interface
++ * @defgroup w1_interface 1-Wire Interface
++ * @ingroup io_interfaces
++ * @{
++ */
++
++/*
++ * Count the number of peripheral devices expected on the bus.
++ * This can be used to decide if the bus has a multi-drop topology or
++ * only a single device is present.
++ * There is a comma after each ordinal (including the last)
++ * Hence FOR_EACH adds "+1" once too often which has to be subtracted in the end.
++ */
++#define F1(x) 1
++#define W1_PERIPHERALS_COUNT(node_id) \
++		(FOR_EACH(F1, (+), DT_SUPPORTS_DEP_ORDS(node_id)) - 1)
++#define W1_INST_PERIPHERALS_COUNT(inst)  \
++		(W1_PERIPHERALS_COUNT(DT_DRV_INST(inst)))
++
++/** W1 driver settings types */
++enum w1_driver_settings_type {
++	W1_SETTING_SPEED,
++	W1_SETTING_STRONG_PULLUP,
++};
++
++/** holds configuration data common to all w1-controller implementations */
++struct w1_controller_config {
++	/* Number of connected client devices */
++	uint16_t client_count;
++};
++
++struct w1_controller_data {
++	/* The mutex used by w1_lock_bus and w1_unlock_bus methods */
++	struct k_mutex bus_lock;
++};
++
++/**  @cond INTERNAL_HIDDEN */
++typedef int (*w1_reset_bus_t)(const struct device *dev);
++typedef int (*w1_read_bit_t)(const struct device *dev);
++typedef int (*w1_write_bit_t)(const struct device *dev, bool bit);
++typedef int (*w1_read_byte_t)(const struct device *dev);
++typedef int (*w1_write_byte_t)(const struct device *dev, const uint8_t byte);
++typedef size_t (*w1_get_peripheral_count_t)(const struct device *dev);
++typedef int (*w1_configure_t)(const struct device *dev,
++			      enum w1_driver_settings_type type,
++			      uint32_t value);
++
++__subsystem struct w1_driver_api {
++	w1_reset_bus_t reset_bus;
++	w1_read_bit_t read_bit;
++	w1_write_bit_t write_bit;
++	w1_read_byte_t read_byte;
++	w1_write_byte_t write_byte;
++	w1_configure_t configure;
++};
++/** @endcond */
++
++/** @cond INTERNAL_HIDDEN */
++__syscall int w1_change_bus_lock(const struct device *dev, bool lock);
++
++static inline int z_impl_w1_change_bus_lock(const struct device *dev, bool lock)
++{
++	struct w1_controller_data *ctrl_data = dev->data;
++
++	if (lock) {
++		return k_mutex_lock(&ctrl_data->bus_lock, K_FOREVER);
++	} else {
++		return k_mutex_unlock(&ctrl_data->bus_lock);
++	}
++}
++/** @endcond */
++
++/**
++ * @brief Lock the 1-wire bus to prevent simultaneous access.
++ *
++ * This routine locks the bus to prevent simultaneous access from different
++ * threads. The calling thread waits until the bus becomes available.
++ * A thread is permitted to lock a mutex it has already locked.
++ *
++ * @param dev  Pointer to the device structure for the driver instance.
++ *
++ * @return 0 on success, or a negative error code on error.
++ */
++static inline int w1_lock_bus(const struct device *dev)
++{
++	return w1_change_bus_lock(dev, true);
++}
++
++/**
++ * @brief Unlock the 1-wire bus.
++ *
++ * This routine unlocks the bus to permit access to bus line.
++ *
++ * @param dev  Pointer to the device structure for the driver instance.
++ *
++ * @return 0 on success, or a negative error code on error.
++ */
++static inline int w1_unlock_bus(const struct device *dev)
++{
++	return w1_change_bus_lock(dev, false);
++}
++
++/**
++ * @brief 1-Wire data link layer
++ * @defgroup w1_data_link 1-Wire data link layer
++ * @ingroup w1_interface
++ * @{
++ */
++
++/**
++ * @brief Reset the 1-Wire bus to prepare peripheral devices for communication.
++ *
++ * This routine resets all 1-Wire bus peripheral devices such that they are
++ * ready to receive a command.
++ * Connected peripherals answer with a presence pulse once they are ready
++ * to receive data.
++ *
++ * In case the driver supports both standard speed and overdrive speed,
++ * the reset routine takes care of sendig either a short or a long reset pulse
++ * depending on the current state.
++ *
++ * @param dev    Pointer to the device structure for the driver instance.
++ *
++ * @retval < 0 In case of an error
++ * @retval 0 If no devices answer with a present pulse.
++ * @retval 1  If at least one device answers with a present pulse.
++ */
++__syscall int w1_reset_bus(const struct device *dev);
++
++static inline int z_impl_w1_reset_bus(const struct device *dev)
++{
++	const struct w1_driver_api *api = dev->api;
++
++	return api->reset_bus(dev);
++}
++
++/**
++ * @brief Read a single bit from the 1-Wire device.
++ *
++ * @param dev  Pointer to the device structure for the driver instance.
++ *
++ * @return The read bit value on success, or a negative error code on error.
++ */
++__syscall int w1_read_bit(const struct device *dev);
++
++static inline int z_impl_w1_read_bit(const struct device *dev)
++{
++	const struct w1_driver_api *api = dev->api;
++
++	return api->read_bit(dev);
++}
++
++/**
++ * @brief Write a single bit to the 1-Wire device.
++ *
++ * @param dev  Pointer to the device structure for the driver instance.
++ * @param bit  Transmitting bit value 1 or 0.
++ *
++ * @return a negative error code on error
++ */
++__syscall int w1_write_bit(const struct device *dev, const bool bit);
++
++static inline int z_impl_w1_write_bit(const struct device *dev, bool bit)
++{
++	const struct w1_driver_api *api = dev->api;
++
++	return api->write_bit(dev, bit);
++}
++
++/**
++ * @brief Read a single byte from the 1-Wire device.
++ *
++ * @param dev  Pointer to the device structure for the driver instance.
++ *
++ * @return The read byte value on success, or a negative error code on error.
++ */
++__syscall int w1_read_byte(const struct device *dev);
++
++static inline int z_impl_w1_read_byte(const struct device *dev)
++{
++	const struct w1_driver_api *api = dev->api;
++
++	return api->read_byte(dev);
++}
++
++/**
++ * @brief Write a single byte to the 1-Wire device.
++ *
++ * @param dev   Pointer to the device structure for the driver instance.
++ * @param byte  Transmitting byte.
++ *
++ * @return a negative error code on error
++ */
++__syscall int w1_write_byte(const struct device *dev, uint8_t byte);
++
++static inline int z_impl_w1_write_byte(const struct device *dev, uint8_t byte)
++{
++	const struct w1_driver_api *api = dev->api;
++
++	return api->write_byte(dev, byte);
++}
++
++/**
++ * @brief Read a block of data from the 1-Wire device.
++ *
++ * @param dev     Pointer to the device structure for the driver instance.
++ * @param buffer  Pointer to receive buffer.
++ * @param length  Length of receiving buffer (in bytes).
++ *
++ * @return a negative error code on error
++ */
++static inline int w1_read_block(const struct device *dev,
++				uint8_t *buffer, size_t length)
++{
++	int ret;
++
++	for (int i = 0; i < length; ++i) {
++		ret = w1_read_byte(dev);
++		if (ret < 0) {
++			return ret;
++		}
++		buffer[i] = ret;
++	}
++
++	return 0;
++}
++
++/**
++ * @brief Write a block of data from the 1-Wire device.
++ *
++ * @param dev     Pointer to the device structure for the driver instance.
++ * @param buffer  Pointer to transmitting buffer.
++ * @param length  Length of transmitting buffer (in bytes).
++ *
++ * @return a negative error code on error
++ */
++static inline int w1_write_block(const struct device *dev,
++				 const uint8_t *buffer, size_t length)
++{
++	int ret;
++
++	for (int i = 0; i < length; ++i) {
++		ret = w1_write_byte(dev, buffer[i]);
++		if (ret) {
++			return ret;
++		}
++	}
++
++	return 0;
++}
++
++/**
++ * @brief Get the number of peripheral devices on the bus.
++ *
++ * @param dev  Pointer to the device structure for the driver instance.
++ *
++ * @return Number of connected w1 peripheral device, or
++ *         a negative error code on error
++ */
++__syscall size_t w1_get_peripheral_count(const struct device *dev);
++
++static inline size_t z_impl_w1_get_peripheral_count(const struct device *dev)
++{
++	const struct w1_controller_config *ctrl_cfg = dev->config;
++
++	return ctrl_cfg->client_count;
++}
++
++/**
++ * @brief Configure parameters of W1-Master.
++ *
++ * @param dev Pointer to the device structure for the driver instance.
++ * @param type enum specifying the setting type
++ * @param value the settings value
++ *
++ * @retval 0 If successful.
++ * @retval -EIO General input / output error, failed to configure device.
++ */
++__syscall int w1_configure(const struct device *dev,
++			   enum w1_driver_settings_type type,
++			   uint32_t value);
++
++static inline int z_impl_w1_configure(const struct device *dev,
++				      enum w1_driver_settings_type type,
++				      uint32_t value)
++{
++	const struct w1_driver_api *api = dev->api;
++
++	return api->configure(dev, type, value);
++}
++
++/**
++ * @}
++ */
++
++#ifdef __cplusplus
++}
++#endif
++
++/**
++ * @}
++ */
++#include <syscalls/w1.h>
++
++#endif /* ZEPHYR_INCLUDE_DRIVERS_W1_H_ */
+
+From 235c0c6ff076bc8e3b318ddab17d3261d6aa0d85 Mon Sep 17 00:00:00 2001
+From: Thomas Stranger <thomas.stranger@outlook.com>
+Date: Tue, 8 Mar 2022 10:15:24 +0100
+Subject: [PATCH 02/11] drivers: w1 introduce 1-wire net layer api
+
+This commit introduces a new api for the net layer of Dallas
+1-wire protocol.
+For single drop configurations w1_read_rom, and w1_skip_rom commands are
+provided.
+For multidrop configurations w1_match_rom, w1_resume_command,
+w1_search_rom, and w1_search_alarm routines are provided as well.
+Additionally, the reset_select routine, conditionally depending on the
+bus configuration, either executes a match_rom, or a skip rom command.
+A w1_write_read command simplifies the typical scenario of addressing
+a device, writing a few bytes to the device and reading back the answer.
+
+Additionally w1_crc8, and w1_crc16 are added as wrappers around the
+zephyr in-tree crc8 and crc16_reflect implementations.
+The former may be used to verify the validity of the rom id, while the
+latter is used for integrity checking of many eeprom, and authenticator
+commands.
+
+The general search command does not support filtering on
+the family code.
+
+Signed-off-by: Thomas Stranger <thomas.stranger@outlook.com>
+---
+ drivers/w1/CMakeLists.txt |   7 +
+ drivers/w1/Kconfig        |   6 +
+ drivers/w1/w1_handlers.c  |  20 ++
+ drivers/w1/w1_net.c       | 405 ++++++++++++++++++++++++++++++++++++++
+ include/drivers/w1.h      | 316 +++++++++++++++++++++++++++++
+ 5 files changed, 754 insertions(+)
+ create mode 100644 drivers/w1/w1_net.c
+
+diff --git a/drivers/w1/CMakeLists.txt b/drivers/w1/CMakeLists.txt
+index f6bcdc3a5afb..45f292a77aa1 100644
+--- a/drivers/w1/CMakeLists.txt
++++ b/drivers/w1/CMakeLists.txt
+@@ -6,3 +6,10 @@ zephyr_sources_ifdef(CONFIG_USERSPACE w1_handlers.c)
+ 
+ # drivers implementing link functions (read, write, reset)
+ # none implemented yet
++
++# network functions:
++if(CONFIG_W1_NET)
++# network functions should be callable from user as well as supervisor mode:
++remove_definitions(-D__ZEPHYR_SUPERVISOR__)
++zephyr_library_sources(w1_net.c)
++endif() #CONFIG_W1_NET
+diff --git a/drivers/w1/Kconfig b/drivers/w1/Kconfig
+index 1406d68358ff..f74a4241ffbb 100644
+--- a/drivers/w1/Kconfig
++++ b/drivers/w1/Kconfig
+@@ -22,4 +22,10 @@ config W1_INIT_PRIORITY
+ 	help
+ 	  1-Wire device driver initialization priority.
+ 
++config W1_NET
++	bool "1-Wire network layer"
++	default y
++	help
++	  Enable 1-wire network layer
++
+ endif # W1
+diff --git a/drivers/w1/w1_handlers.c b/drivers/w1/w1_handlers.c
+index d81a1ae91da9..941281bdb3ba 100644
+--- a/drivers/w1/w1_handlers.c
++++ b/drivers/w1/w1_handlers.c
+@@ -73,4 +73,24 @@ static inline size_t z_vrfy_w1_get_peripheral_count(const struct device *dev)
+ }
+ #include <syscalls/w1_get_peripheral_count_mrsh.c>
+ 
++#if CONFIG_W1_NET
++static inline int z_vrfy_w1_search_bus(const struct device *dev,
++				       uint8_t command, uint8_t family,
++				       w1_search_callback_t callback_isr,
++				       void *callback_arg)
++{
++	Z_OOPS(Z_SYSCALL_OBJ(dev, K_OBJ_DRIVER_W1));
++
++	Z_OOPS(Z_SYSCALL_VERIFY_MSG(callback_isr == 0,
++				    "callbacks may not be set from user mode"));
++	/* callback_arg is not dereferenced, no need to check parameter */
++
++	return z_impl_w1_search_bus((const struct device *)dev,
++				    (uint8_t)command, (uint8_t)family,
++				    (w1_search_callback_t)callback_isr,
++				    (void *)callback_arg);
++}
++
++#endif /* CONFIG_W1_NET */
++
+ #include <syscalls/w1_search_bus_mrsh.c>
+diff --git a/drivers/w1/w1_net.c b/drivers/w1/w1_net.c
+new file mode 100644
+index 000000000000..04dccfaf2aa4
+--- /dev/null
++++ b/drivers/w1/w1_net.c
+@@ -0,0 +1,405 @@
++/*
++ * Copyright (c) 2022 Thomas Stranger
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++/**
++ * @brief 1-Wire network related functions.
++ *
++ * The following procedures wrap basic w1 syscalls, they should be callable
++ * from user mode as well as supervisor mode, therefore _ZEPHYR_SUPERVISOR__
++ * is not defined for this file such that inline macros do not skip
++ * the arch_is_user_context() check.
++ */
++
++#include <logging/log.h>
++#include <drivers/w1.h>
++
++LOG_MODULE_REGISTER(w1, CONFIG_W1_LOG_LEVEL);
++
++#define W1_SEARCH_DISCREPANCY_INIT 0
++#define W1_SEARCH_LAST_DEVICE	   65
++#define W1_SEARCH_NO_DEVICE	   66
++
++/* @brief searches bus for next device
++ *
++ * This function searches the next 1-wire device on the bus.
++ * It sets the found rom and the last discrepancy in case more than one
++ * device took part in the search.
++ * In case only one device took part in the search, the discrepancy is set to
++ * W1_SEARCH_LAST_DEVICE, and in case no device participated in the search,
++ * the discrepancy is set to W1_SEARCH_NO_DEVICE.
++ *
++ * The implementation is similar as suggested in the maxim application note 187.
++ * The controller reads the first rom bit and its complementary value of all
++ * devices.
++ * Due to physical characteristics, the value received is a
++ * logical AND of all devices 1st bit. Devices only continue to participate
++ * in the search procedure if the next bit the controller sends matches their
++ * own addresses bit. This allows the controller to branch through 64-bit
++ * addresses in order to detect all devices.
++
++ * The 1st bit received is stored in bit 1 of rom_inv_64, the 2nd in bit 2 and so
++ * on until bit 64.
++ * As a result each byte of the rom has the correct bit order, but the received
++ * bytes (big-endian) stored in rom_inv_64 are in inverse byte order.
++ *
++ * Note: Filtering on families is not supported.
++ *
++ * @param dev              Pointer to the device structure for the w1 instance.
++ * @param command          Command to chose between normal and alarm search.
++ * @param family           The family is ignored in search.
++ * @param last_discrepancy This must be set to W1_SEARCH_DISCREPANCY_INIT before
++ *                         the first call, it carries the search progress for
++ *                         further calls.
++ * @param rom_inv_64       The found rom: It must be set to zero before first
++ *                         call and carries the last found rom for furter calls.
++ *                         The rom is stored in inverse byte order.
++ *
++ * @retval 0 If successful.
++ * @retval -EIO in case of 1-wire read/write error
++ */
++static int search_device(const struct device *dev, uint8_t command,
++			 uint8_t family, size_t *last_discrepancy,
++			 uint64_t *rom_inv_64)
++{
++	int ret;
++	size_t next_discrepancy;
++	bool last_id_bit;
++	bool last_complement_id_bit;
++
++	ARG_UNUSED(family);
++	__ASSERT_NO_MSG(command == W1_CMD_SEARCH_ROM ||
++			command == W1_CMD_SEARCH_ALARM);
++
++	ret = w1_reset_bus(dev);
++	if (ret < 0) {
++		return ret;
++	}
++	if (ret == 0) {
++		*last_discrepancy = W1_SEARCH_NO_DEVICE;
++		return 0;
++	}
++
++	ret = w1_write_byte(dev, command);
++	if (ret < 0) {
++		return ret;
++	}
++	next_discrepancy = W1_SEARCH_LAST_DEVICE;
++
++	for (size_t id_bit_nr = 1; id_bit_nr < W1_SEARCH_LAST_DEVICE; id_bit_nr++) {
++		ret = w1_read_bit(dev);
++		if (ret < 0) {
++			return ret;
++		}
++		last_id_bit = (bool)ret;
++		ret = w1_read_bit(dev);
++		if (ret < 0) {
++			return ret;
++		}
++		last_complement_id_bit = (bool)ret;
++
++		if (last_id_bit && last_complement_id_bit) {
++			/*
++			 * No device participating:
++			 * We can stop following the branch.
++			 */
++			LOG_DBG("No device paricipating");
++			*last_discrepancy = W1_SEARCH_NO_DEVICE;
++			return 0;
++		} else if (last_id_bit != last_complement_id_bit) {
++			/*
++			 * All devices connected have same ROM bit value:
++			 * We can directly follow last_id_bit branch.
++			 */
++		} else {
++			/*
++			 * Discrepancy detected: bit value at id_bit_nr does
++			 * not match for all devices on the bus.
++			 */
++			if ((id_bit_nr > *last_discrepancy) ||
++			    ((id_bit_nr < *last_discrepancy) &&
++			     (*rom_inv_64 & BIT64(id_bit_nr - 1)))) {
++				/*
++				 * - id_bit_nr > last_discrepancy:
++				 *     Start always w/ branch of 1s
++				 * - id_bit_nr < last_discrepancy:
++				 *     Follow same branch as before
++				 */
++				last_id_bit = true;
++				next_discrepancy = id_bit_nr;
++			} else {
++				/*
++				 * - id_bit_nr == last_discrepancy:
++				 *     1-path already done, therefore go 0 path
++				 * - id_bit_nr < last_discrepancy:
++				 *     Follow same branch as before
++				 */
++			}
++		}
++
++		/*
++		 * Send and store the chosen bit: all not matching devices will
++		 * no longer participate in this search until they are reset.
++		 */
++		ret = w1_write_bit(dev, last_id_bit);
++		if (ret < 0) {
++			return ret;
++		}
++		*rom_inv_64 &= ~BIT64(id_bit_nr - 1);
++		*rom_inv_64 |= last_id_bit ? BIT64(id_bit_nr - 1) : 0;
++	}
++
++	*last_discrepancy = next_discrepancy;
++	return 0;
++}
++
++int z_impl_w1_search_bus(const struct device *dev, uint8_t command,
++			 uint8_t family, w1_search_callback_t callback_isr,
++			 void *callback_arg)
++{
++	size_t last_discrepancy = W1_SEARCH_DISCREPANCY_INIT;
++	uint64_t found_rom_inv_64 = 0;
++	struct w1_rom found_rom = { 0 };
++	int found_cnt = 0;
++	int ret;
++
++	(void)w1_lock_bus(dev);
++
++	do {
++		ret = search_device(dev, command, family, &last_discrepancy,
++				    &found_rom_inv_64);
++		if (ret < 0) {
++			found_cnt = ret;
++			break;
++		}
++		if (last_discrepancy == W1_SEARCH_NO_DEVICE) {
++			break;
++		}
++
++		found_cnt++;
++		/*
++		 * rom is stored in found_rom_inv_64 in "inverse byte order" =>
++		 * Only big-endian targets need to swap, such that struct's
++		 * bytes are stored in big-endian byte order.
++		 */
++		if (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__) {
++			sys_memcpy_swap(&found_rom, &found_rom_inv_64, 8);
++		} else {
++			*(uint64_t *)&found_rom = found_rom_inv_64;
++		}
++		LOG_DBG("rom-found: nr.%u, %016llx", found_cnt,
++			w1_rom_to_uint64(&found_rom));
++
++		if (callback_isr != NULL) {
++			callback_isr(found_rom, callback_arg);
++		}
++
++	} while (last_discrepancy != W1_SEARCH_LAST_DEVICE);
++
++	(void)w1_unlock_bus(dev);
++	return found_cnt;
++}
++
++int w1_read_rom(const struct device *dev, struct w1_rom *rom_id)
++{
++	int ret;
++
++	(void)w1_lock_bus(dev);
++	ret = w1_reset_bus(dev);
++	if (ret == 0) {
++		ret = -ENODEV;
++		goto out;
++	}
++	if (ret < 0) {
++		goto out;
++	}
++
++	ret = w1_write_byte(dev, W1_CMD_READ_ROM);
++	if (ret < 0) {
++		goto out;
++	}
++	ret = w1_read_block(dev, (uint8_t *)rom_id, sizeof(struct w1_rom));
++	if (ret < 0) {
++		goto out;
++	}
++	if (w1_crc8((uint8_t *)rom_id, sizeof(struct w1_rom)) != 0) {
++		ret = -EIO;
++	}
++
++out:
++	(void)w1_unlock_bus(dev);
++	return ret;
++};
++
++static int match_rom(const struct device *dev, const struct w1_config *config)
++{
++	int ret;
++	uint8_t cmd;
++
++	if (!config->overdrive) {
++		if (w1_configure(dev, W1_SETTING_SPEED, 0) < 0) {
++			return -EIO;
++		}
++	}
++
++	ret = w1_reset_bus(dev);
++	if (ret == 0) {
++		ret = -ENODEV;
++		goto out;
++	}
++	if (ret < 0) {
++		goto out;
++	}
++
++	cmd = config->overdrive ? W1_CMD_OVERDRIVE_MATCH_ROM : W1_CMD_MATCH_ROM;
++	ret = w1_write_byte(dev, cmd);
++	if (ret < 0) {
++		goto out;
++	}
++	ret = w1_write_block(dev, (uint8_t *)&config->rom_id, 8);
++	if (ret < 0) {
++		goto out;
++	}
++
++	if (config->overdrive) {
++		if (w1_configure(dev, W1_SETTING_SPEED, 1) < 0) {
++			return -EIO;
++		}
++	}
++out:
++	return ret;
++};
++
++int w1_match_rom(const struct device *dev, const struct w1_config *config)
++{
++	int ret;
++
++	(void)w1_lock_bus(dev);
++	ret = match_rom(dev, config);
++	(void)w1_unlock_bus(dev);
++	return ret;
++}
++
++int w1_resume_command(const struct device *dev)
++{
++	int ret;
++
++	(void)w1_lock_bus(dev);
++	ret = w1_reset_bus(dev);
++	if (ret == 0) {
++		ret = -ENODEV;
++		goto out;
++	}
++	if (ret < 0) {
++		goto out;
++	}
++
++	ret = w1_write_byte(dev, W1_CMD_RESUME);
++out:
++	(void)w1_unlock_bus(dev);
++	return ret;
++}
++
++static int skip_rom(const struct device *dev, const struct w1_config *config)
++{
++	int ret;
++	uint8_t cmd;
++
++	if (!config->overdrive) {
++		if (w1_configure(dev, W1_SETTING_SPEED, 0) < 0) {
++			return -EIO;
++		}
++	}
++
++	ret = w1_reset_bus(dev);
++	if (ret == 0) {
++		ret = -ENODEV;
++		goto out;
++	}
++	if (ret < 0) {
++		goto out;
++	}
++
++	cmd = config->overdrive ? W1_CMD_OVERDRIVE_SKIP_ROM : W1_CMD_SKIP_ROM;
++	ret = w1_write_byte(dev, cmd);
++	if (ret < 0) {
++		goto out;
++	}
++
++	if (config->overdrive) {
++		if (w1_configure(dev, W1_SETTING_SPEED, 0) < 0) {
++			return -EIO;
++		}
++	}
++
++out:
++	return ret;
++}
++
++int w1_skip_rom(const struct device *dev, const struct w1_config *config)
++{
++	int ret;
++
++	(void)w1_lock_bus(dev);
++	ret = skip_rom(dev, config);
++	(void)w1_unlock_bus(dev);
++	return ret;
++}
++
++static int reset_select(const struct device *dev, const struct w1_config *config)
++{
++	if (w1_get_peripheral_count(dev) > 1) {
++		return match_rom(dev, config);
++	}
++
++	return skip_rom(dev, config);
++}
++
++int w1_reset_select(const struct device *dev, const struct w1_config *config)
++{
++	int ret;
++
++	(void)w1_lock_bus(dev);
++	ret = reset_select(dev, config);
++	(void)w1_unlock_bus(dev);
++	return ret;
++}
++
++static int write_read(const struct device *dev, const struct w1_config *config,
++		      const uint8_t *write_buf, size_t write_len,
++		      uint8_t *read_buf, size_t read_len)
++{
++	int ret;
++
++	ret = reset_select(dev, config);
++	if (ret != 0) {
++		goto out;
++	}
++
++	ret = w1_write_block(dev, write_buf, write_len);
++	if (ret < 0) {
++		goto out;
++	}
++	if (read_buf == NULL) {
++		ret = -EIO;
++		goto out;
++	}
++	ret = w1_read_block(dev, read_buf, read_len);
++
++out:
++	return ret;
++};
++
++int w1_write_read(const struct device *dev, const struct w1_config *config,
++		  const uint8_t *write_buf, size_t write_len,
++		  uint8_t *read_buf, size_t read_len)
++{
++	int ret;
++
++	(void)w1_lock_bus(dev);
++	ret = write_read(dev, config, write_buf, write_len, read_buf, read_len);
++	(void)w1_unlock_bus(dev);
++	return ret;
++};
+diff --git a/include/drivers/w1.h b/include/drivers/w1.h
+index a8df621a7be4..8d8e97ece0b4 100644
+--- a/include/drivers/w1.h
++++ b/include/drivers/w1.h
+@@ -314,6 +314,322 @@ static inline int z_impl_w1_configure(const struct device *dev,
+ 	return api->configure(dev, type, value);
+ }
+ 
++/**
++ * @}
++ */
++
++/**
++ * @brief 1-Wire network layer
++ * @defgroup w1_network 1-Wire network layer
++ * @ingroup w1_interface
++ * @{
++ */
++
++/*
++ * ROM Commands
++ */
++#define W1_CMD_SKIP_ROM			0xCC
++#define W1_CMD_MATCH_ROM		0x55
++#define W1_CMD_RESUME			0xA5
++#define W1_CMD_READ_ROM			0x33
++#define W1_CMD_SEARCH_ROM		0xF0
++#define W1_CMD_SEARCH_ALARM		0xEC
++#define W1_CMD_OVERDRIVE_SKIP_ROM	0x3C
++#define W1_CMD_OVERDRIVE_MATCH_ROM	0x69
++
++/*
++ * CRC definitions
++ */
++/** seed value used to calculate the w1 8-bit crc */
++#define W1_CRC8_SEED		0x00
++/** polynomial used to calculate the w1 8-bit crc */
++#define W1_CRC8_POLYNOMIAL	0x8C
++/** seed value used to calculate the w1 16-bit crc */
++#define W1_CRC16_SEED		0x0000
++/** polynomial used to calculate the w1 16-bit crc */
++#define W1_CRC16_POLYNOMIAL	0xa001
++
++/** this flag can be passed to searches in order to not filter on family ID */
++#define W1_SEARCH_ALL_FAMILIES		0x00
++
++/** Intitialize a w1_rom struct zeroes */
++#define W1_ROM_INIT_ZERO					\
++	{							\
++		.family = 0, .serial = { 0 }, .crc = 0,		\
++	}
++
++/**
++ * @brief w1_rom struct.
++ */
++struct w1_rom {
++	/** 1-Wire family code identifies the device type
++	 *
++	 * Incomplete list of family codes is available at:
++	 * https://www.maximintegrated.com/en/app-notes/index.mvp/id/155
++	 * others are documented in the respective device data sheet.
++	 */
++	uint8_t family;
++	/** Serial together with the family code composes the unique id */
++	uint8_t serial[6];
++	/** Checksum of 56-bit unique id */
++	uint8_t crc;
++};
++
++/**
++ * @brief node specific 1-wire configuration struct.
++ */
++struct w1_config {
++	struct w1_rom rom_id;
++	/* overdrive-speed is used if 1 */
++	uint32_t overdrive : 1;
++};
++
++/**
++ * @typedef w1_search_callback_t
++ * @brief Define the application callback handler function signature
++ *        for searches.
++ *
++ * @param rom found The ROM of the found device.
++ * @param cb_arg    The argument that was passed to the search command.
++ */
++typedef void (*w1_search_callback_t)(struct w1_rom rom, void *cb_arg);
++
++/**
++ * @brief Read Peripheral 64-bit ROM ID.
++ *
++ * This procedure allows the bus master to read the peripherals’s 64-bit ROM id
++ * without using the Search ROM procedure.
++ * This command can be used as long as not more than a sigle peripheral is
++ * connected to the bus.
++ * Otherwise data collisons occur and a faulty ROM id is read.
++ *
++ * @param dev     Pointer to the device structure for the driver instance.
++ * @param rom_id  Pointer to the ROM id structure.
++ *
++ * @retval        0 on success.
++ * @retval        -ENODEV in case no device responds to reset.
++ * @retval        another negative value in case of invalid crc and
++ *                communication errors.
++ */
++int w1_read_rom(const struct device *dev, struct w1_rom *rom_id);
++
++/**
++ * @brief Select a specific device by broadcasting a selected ROM ID.
++ *
++ * This routine allows the bus master to select a peripheral device identified
++ * by it's unique ROM id, such that the next command will target only this
++ * single selected device.
++ *
++ * This command is only necessary in multidrop environments, otherwise the
++ * skip rom command can be issued instead.
++ * Once a device has been selected, the resume command can be used instead of
++ * this command to reduce the communication overhead.
++ *
++ * @param dev     Pointer to the device structure for the driver instance.
++ * @param config  Pointer to the device specific w1 config.
++ *
++ * @retval        0 on success.
++ * @retval        -ENODEV in case no device responds to reset.
++ * @retval        another negative value in case of an error.
++ */
++int w1_match_rom(const struct device *dev, const struct w1_config *config);
++
++/**
++ * @brief Select the device last addressed with a Match ROM or Search ROM commnad.
++ *
++ * This routine allows the bus master to re-select a peripheral device
++ * which was already addressed using a Match ROm or Search ROM command.
++ *
++ * @param dev     Pointer to the device structure for the driver instance.
++ *
++ * @retval        0 on success.
++ * @retval        -ENODEV in case no device responds to reset.
++ * @retval        another negative value in case of an error.
++ */
++int w1_resume_command(const struct device *dev);
++
++/**
++ * @brief Select all devices regardless of ROM ID.
++ *
++ * This routine sets up the bus devices to receive a command.
++ * It is usually used when there is only one peripheral on the bus
++ * to avoid the overhead of the match rom command.
++ * But it can also be used to concurrently write to all devices.
++ *
++ * @param dev  Pointer to the device structure for the driver instance.
++ * @param config  Pointer to the device specific w1 config.
++ *
++ * @retval        0 on success.
++ * @retval        -ENODEV in case no device responds to reset.
++ * @retval        another negative value in case of an error.
++ */
++int w1_skip_rom(const struct device *dev, const struct w1_config *config);
++
++/**
++ * @brief In single drop configurations use SKIP_SELECT command, else use
++ *        MATCH_ROM command.
++ *
++ * @param dev  Pointer to the device structure for the driver instance.
++ * @param config  Pointer to the device specific w1 config.
++ *
++ * @retval        0 on success.
++ * @retval        -ENODEV in case no device responds to reset.
++ * @retval        another negative value in case of an error.
++ */
++int w1_reset_select(const struct device *dev, const struct w1_config *config);
++
++/**
++ * @brief Write then read data from the 1-Wire target device with matching rom.
++ *
++ * This routine uses w1_reset_select to select the given rom_id.
++ * Then writes given data and reads the response back from the device.
++ *
++ * @param dev  Pointer to the device structure for the driver instance.
++ * @param config  Pointer to the device specific w1 config.
++ * @param write_buf Pointer to the data to be written.
++ * @param write_len Number of bytes to write.
++ * @param read_buf  Pointer to storage for read data.
++ * @param read_len  Number of bytes to read.
++ *
++ * @retval        0 on success.
++ * @retval        -ENODEV in case no device responds to reset.
++ * @retval        another negative value in case of an error.
++ */
++int w1_write_read(const struct device *dev, const struct w1_config *config,
++		  const uint8_t *write_buf, size_t write_len,
++		  uint8_t *read_buf, size_t read_len);
++
++/**
++ * @brief Search 1-wire devices on the bus.
++ *
++ * This function searches devices on the 1-wire bus, with the possibility
++ * to search either all devices or only devices that have an active alarm state.
++ * If a callback_isr is passed, the callback is called for each found device.
++ *
++ * The algorithm mostly follows the suggestions of
++ * https://pdfserv.maximintegrated.com/en/an/AN187.pdf
++ *
++ * Note: Filtering on families is not supported.
++ *
++ * @param dev           Pointer to the device structure for the driver instance.
++ * @param command       Can either be W1_SEARCH_ALARM or W1_SEARCH_ROM.
++ * @param family        W1_SEARCH_ALL_FAMILIES searcheas all families, filtering
++ *                      on a specific family is not yet supported.
++ * @param callback_isr  Is called for each found device.
++ * @param callback_arg  This will be passed whenever the isr is called.
++ *
++ * @retval              Number of devices found.
++ * @retval              -EIO if search failed due to w1 read/write issues.
++ */
++__syscall int w1_search_bus(const struct device *dev,
++			       uint8_t command,
++			       uint8_t family,
++			       w1_search_callback_t callback_isr,
++			       void *callback_arg);
++
++/**
++ * @brief Search for 1-Wire device on bus.
++ *
++ * This routine can discover unknown devices on the bus by scanning for the
++ * unique 64-bit registration number.
++ *
++ * @param dev           Pointer to the device structure for the driver instance.
++ * @param callback_isr  Is called for each found device.
++ * @param callback_arg  This will be passed whenever the isr is called.
++ *
++ * @retval              Number of devices found.
++ * @retval              -EIO if search failed due to w1 read/write issues.
++ */
++static inline int w1_search_rom(const struct device *dev,
++				  w1_search_callback_t callback_isr,
++				  void *callback_arg)
++{
++	return w1_search_bus(dev, W1_CMD_SEARCH_ROM, W1_SEARCH_ALL_FAMILIES,
++			     callback_isr, callback_arg);
++}
++
++/**
++ * @brief Search for 1-Wire devices with an active alarm.
++ *
++ * This routine searches 1-Wire devices on the bus, which currently have
++ * an active alarm.
++ *
++ * @param dev           Pointer to the device structure for the driver instance.
++ * @param callback_isr  Is called for each found device.
++ * @param callback_arg  This will be passed whenever the isr is called.
++ *
++ * @retval              Number of devices found.
++ * @retval              -EIO if search failed due to w1 read/write issues.
++ */
++static inline int w1_search_alarm(const struct device *dev,
++				     w1_search_callback_t callback_isr,
++				     void *callback_arg)
++{
++	return w1_search_bus(dev, W1_CMD_SEARCH_ALARM, W1_SEARCH_ALL_FAMILIES,
++			     callback_isr, callback_arg);
++}
++
++/**
++ * @brief Function to convert a w1_rom struct to an uint64_t.
++ *
++ * @param rom  Pointer to the rom struct.
++ *
++ * @retval     the rom converted to an unsigned integer in host endianness.
++ */
++static inline uint64_t w1_rom_to_uint64(const struct w1_rom *rom)
++{
++	return sys_get_be64((uint8_t *)rom);
++}
++
++/**
++ * @brief Function to write an uint64_t to struct w1_rom ptr.
++ *
++ * @param rom64 Unsigned 64 bit integer representing the rom in host endianness.
++ * @param rom   The rom struct ptr.
++ */
++static inline void w1_uint64_to_rom(const uint64_t rom64, struct w1_rom *rom)
++{
++	sys_put_be64(rom64, (uint8_t *)rom);
++}
++
++/**
++ * @brief Compute CRC-8 chacksum as defined in the 1-Wire specification.
++ *
++ * The 1-Wire of CRC 8 variant is using 0x31 as its polynomial with the initial
++ * value set to 0x00.
++ * This CRC is used to check the correctness of the unique 56-bit ROM ID.
++ *
++ * @param src  Input bytes for the computation.
++ * @param len  Length of the input in bytes.
++ *
++ * @retval     The computed CRC8 value.
++ */
++static inline uint8_t w1_crc8(const uint8_t *src, size_t len)
++{
++	return crc8(src, len, W1_CRC8_POLYNOMIAL, W1_CRC8_SEED, true);
++}
++
++/**
++ * @brief Compute 1-Wire variant of CRC 16
++ *
++ * The 16-bit 1-Wire crc variant is using the reflected polynomial function
++ * X^16 + X^15 * + X^2 + 1 with the initial value set to 0x0000.
++ * See also APPLICATION NOTE 27: "UNDERSTANDING AND USING CYCLIC REDUNDANCY
++ * CHECKS WITH MAXIM 1-WIRE AND IBUTTON PRODUCTS"
++ * https://www.maximintegrated.com/en/design/technical-documents/app-notes/2/27.html
++ *
++ * @param seed   Init value for the CRC; it is usually set to 0x0000
++ * @param src    Input bytes for the computation
++ * @param len    Length of the input in bytes
++ *
++ * @return The computed CRC16 value
++ */
++static inline uint16_t w1_crc16(const uint16_t seed, const uint8_t *src,
++				const size_t len)
++{
++	return crc16_reflect(W1_CRC16_POLYNOMIAL, seed, src, len);
++}
++
+ /**
+  * @}
+  */
+
+From 8c261dba6d233f2d720abf1751d44aaad05e73ae Mon Sep 17 00:00:00 2001
+From: Thomas Stranger <thomas.stranger@outlook.com>
+Date: Sun, 6 Mar 2022 12:19:09 +0100
+Subject: [PATCH 03/11] drivers: w1: add vnd,w1 driver for ci testing
+
+This commit adds the vnd,w1 dummy driver used for ci builds of 1-wire
+devices.
+
+Signed-off-by: Thomas Stranger <thomas.stranger@outlook.com>
+---
+ drivers/w1/CMakeLists.txt     |  2 +-
+ drivers/w1/Kconfig            |  2 +
+ drivers/w1/Kconfig.test       |  9 ++++
+ drivers/w1/w1_test.c          | 80 +++++++++++++++++++++++++++++++++++
+ dts/bindings/test/vnd,w1.yaml |  8 ++++
+ 5 files changed, 100 insertions(+), 1 deletion(-)
+ create mode 100644 drivers/w1/Kconfig.test
+ create mode 100644 drivers/w1/w1_test.c
+ create mode 100644 dts/bindings/test/vnd,w1.yaml
+
+diff --git a/drivers/w1/CMakeLists.txt b/drivers/w1/CMakeLists.txt
+index 45f292a77aa1..3477b701b90d 100644
+--- a/drivers/w1/CMakeLists.txt
++++ b/drivers/w1/CMakeLists.txt
+@@ -5,7 +5,7 @@ zephyr_library()
+ zephyr_sources_ifdef(CONFIG_USERSPACE w1_handlers.c)
+ 
+ # drivers implementing link functions (read, write, reset)
+-# none implemented yet
++zephyr_library_sources_ifdef(CONFIG_W1_TEST           w1_test.c)
+ 
+ # network functions:
+ if(CONFIG_W1_NET)
+diff --git a/drivers/w1/Kconfig b/drivers/w1/Kconfig
+index f74a4241ffbb..a79bdc2524cc 100644
+--- a/drivers/w1/Kconfig
++++ b/drivers/w1/Kconfig
+@@ -22,6 +22,8 @@ config W1_INIT_PRIORITY
+ 	help
+ 	  1-Wire device driver initialization priority.
+ 
++rsource "Kconfig.test"
++
+ config W1_NET
+ 	bool "1-Wire network layer"
+ 	default y
+diff --git a/drivers/w1/Kconfig.test b/drivers/w1/Kconfig.test
+new file mode 100644
+index 000000000000..4a80f3ab336e
+--- /dev/null
++++ b/drivers/w1/Kconfig.test
+@@ -0,0 +1,9 @@
++# Copyright (c) 2022, Thomas Stranger
++# SPDX-License-Identifier: Apache-2.0
++
++DT_COMPAT_VND_W1 := vnd,w1
++
++# Hidden option to enable the vnd,w1 master driver used in testing.
++# used in testing.
++config W1_TEST
++	def_bool $(dt_compat_enabled,$(DT_COMPAT_VND_W1))
+diff --git a/drivers/w1/w1_test.c b/drivers/w1/w1_test.c
+new file mode 100644
+index 000000000000..9680eb22c579
+--- /dev/null
++++ b/drivers/w1/w1_test.c
+@@ -0,0 +1,80 @@
++/*
++ * Copyright (c) 2022 Thomas Stranger
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#define DT_DRV_COMPAT vnd_w1
++
++/*
++ * This is not a real 1-Wire driver. It is only used to instantiate struct
++ * devices for the "vnd,w1" devicetree compatibe used in test code.
++ */
++#include <drivers/w1.h>
++
++struct w1_vnd_config {
++	/** w1 controller config, common to all drivers */
++	struct w1_controller_config ctrl_config;
++};
++
++struct w1_vnd_data {
++	/** w1 controller data, common to all drivers */
++	struct w1_controller_data ctrl_data;
++};
++
++static int w1_vnd_reset_bus(const struct device *dev)
++{
++	return -ENOTSUP;
++}
++
++static int w1_vnd_read_bit(const struct device *dev)
++{
++	return -ENOTSUP;
++}
++
++static int w1_vnd_write_bit(const struct device *dev, const bool bit)
++{
++	return -ENOTSUP;
++}
++
++static int w1_vnd_read_byte(const struct device *dev)
++{
++	return -ENOTSUP;
++}
++
++static int w1_vnd_write_byte(const struct device *dev, const uint8_t byte)
++{
++	return -ENOTSUP;
++}
++
++static int w1_vnd_configure(const struct device *dev,
++			    enum w1_driver_settings_type type,
++			    uint32_t value)
++{
++	return -ENOTSUP;
++}
++
++static const struct w1_driver_api w1_vnd_api = {
++	.reset_bus = w1_vnd_reset_bus,
++	.read_bit = w1_vnd_read_bit,
++	.write_bit = w1_vnd_write_bit,
++	.read_byte = w1_vnd_read_byte,
++	.write_byte = w1_vnd_write_byte,
++	.configure = w1_vnd_configure,
++};
++
++static int w1_vnd_init(const struct device *dev)
++{
++	return 0;
++}
++
++#define W1_VND_INIT(n)							     \
++static const struct w1_vnd_config w1_vnd_cfg_##inst = {			     \
++	.ctrl_config.client_count = W1_PERIPHERALS_COUNT(DT_DRV_INST(inst))  \
++};									     \
++static struct w1_vnd_data w1_vnd_data_##inst = {};			     \
++DEVICE_DT_INST_DEFINE(n, &w1_vnd_init, NULL, &w1_vnd_data_##inst,	     \
++		      &w1_vnd_cfg_##inst, POST_KERNEL,			     \
++		      CONFIG_W1_INIT_PRIORITY, &w1_vnd_api);
++
++DT_INST_FOREACH_STATUS_OKAY(W1_VND_INIT)
+diff --git a/dts/bindings/test/vnd,w1.yaml b/dts/bindings/test/vnd,w1.yaml
+new file mode 100644
+index 000000000000..42b45e642c3d
+--- /dev/null
++++ b/dts/bindings/test/vnd,w1.yaml
+@@ -0,0 +1,8 @@
++# Copyright (c) 2022 Thomas Stranger
++# SPDX-License-Identifier: Apache-2.0
++
++description: Test W1 master node
++
++compatible: "vnd,w1"
++
++include: [w1-controller.yaml]
+
+From e6e7dd82a68e5b41091321a0f58299350d252df5 Mon Sep 17 00:00:00 2001
+From: Thomas Stranger <thomas.stranger@outlook.com>
+Date: Sun, 18 Jul 2021 18:41:20 +0200
+Subject: [PATCH 04/11] drivers: w1: add zephyr-serial driver
+
+The zephyr-serial w1 driver introduced in this commit implements
+all routines for the w1 api on top of the zephyr serial driver.
+W1 bit read, write, and reset operations are executed by issuing
+polling zephyr serial byte read and write operations.
+
+The driver should be usable on most platforms in zephyr that have
+implemented support for the polling procedures of the serial driver.
+As not all serial drivers are implemented exactly the same minor
+additional quirks may be needed on some platforms.
+The most notable difference of polling serial driver implementations
+seems to be that some return immediately from poll_out after the
+transmission was started(e.g. STM32) and others wait until
+the transmission was completed before returning from poll_out
+(e.g. NRF). While this has influence on the timeout, both types
+are supported by this driver because the driver waits for a
+configurable time period until it terminates the read.
+
+The driver needs an appropriate open drain interface to be able
+to communicate with peripheral devices. In the simpliest case
+this might be achived by configuring the mcu pins in open-drain
+configuration with a (sufficiently small) pull-up to 3V3/5V.
+Otherwise an external circuit needs to provide this interface.
+
+Signed-off-by: Thomas Stranger <thomas.stranger@outlook.com>
+---
+ drivers/w1/CMakeLists.txt             |   1 +
+ drivers/w1/Kconfig                    |   1 +
+ drivers/w1/Kconfig.zephyr_serial      |  29 +++
+ drivers/w1/w1_zephyr_serial.c         | 285 ++++++++++++++++++++++++++
+ dts/bindings/w1/zephyr,w1-serial.yaml |  15 ++
+ 5 files changed, 331 insertions(+)
+ create mode 100644 drivers/w1/Kconfig.zephyr_serial
+ create mode 100644 drivers/w1/w1_zephyr_serial.c
+ create mode 100644 dts/bindings/w1/zephyr,w1-serial.yaml
+
+diff --git a/drivers/w1/CMakeLists.txt b/drivers/w1/CMakeLists.txt
+index 3477b701b90d..e56aa32bc854 100644
+--- a/drivers/w1/CMakeLists.txt
++++ b/drivers/w1/CMakeLists.txt
+@@ -6,6 +6,7 @@ zephyr_sources_ifdef(CONFIG_USERSPACE w1_handlers.c)
+ 
+ # drivers implementing link functions (read, write, reset)
+ zephyr_library_sources_ifdef(CONFIG_W1_TEST           w1_test.c)
++zephyr_library_sources_ifdef(CONFIG_W1_ZEPHYR_SERIAL  w1_zephyr_serial.c)
+ 
+ # network functions:
+ if(CONFIG_W1_NET)
+diff --git a/drivers/w1/Kconfig b/drivers/w1/Kconfig
+index a79bdc2524cc..a9dd886dee8f 100644
+--- a/drivers/w1/Kconfig
++++ b/drivers/w1/Kconfig
+@@ -23,6 +23,7 @@ config W1_INIT_PRIORITY
+ 	  1-Wire device driver initialization priority.
+ 
+ rsource "Kconfig.test"
++rsource "Kconfig.zephyr_serial"
+ 
+ config W1_NET
+ 	bool "1-Wire network layer"
+diff --git a/drivers/w1/Kconfig.zephyr_serial b/drivers/w1/Kconfig.zephyr_serial
+new file mode 100644
+index 000000000000..b1291594bdd9
+--- /dev/null
++++ b/drivers/w1/Kconfig.zephyr_serial
+@@ -0,0 +1,29 @@
++# Configuration options for the Zephyr serial 1-Wire driver
++
++# Copyright (c) 2022 Thomas Stranger
++# SPDX-License-Identifier: Apache-2.0
++
++DT_COMPAT_ZEPHYR_SERIAL := zephyr,w1-serial
++
++config W1_ZEPHYR_SERIAL
++	bool "1-wire Serial"
++	default y if $(dt_compat_enabled,$(DT_COMPAT_ZEPHYR_SERIAL))
++	help
++	  This option enables the w1 zephyr serial driver.
++
++	  The bus reset, and bit read and write operations are executed
++	  via bytes read and write operations on top of the zephyr
++	  serial driver interface.
++
++if W1_ZEPHYR_SERIAL
++
++config W1_ZEPHYR_SERIAL_BIT_TIMEOUT
++	int "Bit read timeout in us"
++	default 380
++	help
++	  The bit read timeout specifies how long the driver tries to read the
++	  uart byte (1-wire bit data bit).
++	  For serial drivers where poll_out does not block until the transfer is
++	  complete, it must at least be greater than 87us (10bits / 115200baud).
++
++endif # W1_ZEPHYR_SERIAL
+diff --git a/drivers/w1/w1_zephyr_serial.c b/drivers/w1/w1_zephyr_serial.c
+new file mode 100644
+index 000000000000..898ed0b0bc4f
+--- /dev/null
++++ b/drivers/w1/w1_zephyr_serial.c
+@@ -0,0 +1,285 @@
++/*
++ * Copyright (c) 2022 Thomas Stranger
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#define DT_DRV_COMPAT zephyr_w1_serial
++
++/**
++ * @brief Driver for 1-Wire Master using serial interface.
++ *
++ * This driver implements the 1-Wire interface using an uart.
++ * The driver uses a uart peripheral with a baudrate of 115200 to send and
++ * receive data bits and a baurade of 9600 for device reset and presence
++ * detection as suggested in:
++ * https://www.maximintegrated.com/en/design/technical-documents/tutorials/2/214.html
++ */
++
++#include <stdint.h>
++#include <stdbool.h>
++#include <drivers/uart.h>
++#include <drivers/w1.h>
++#include <logging/log.h>
++#include <sys/__assert.h>
++
++LOG_MODULE_REGISTER(w1_serial, CONFIG_W1_LOG_LEVEL);
++
++#define W1_SERIAL_READ_REQ_BYTE   0xFF
++#define W1_SERIAL_BIT_1           0xFF
++#define W1_SERIAL_BIT_0           0x00
++
++/* Standard speed signal parameters:
++ * RST: t_RSTL=520us; t_slot=1041us
++ * DATA: t_low1=8.68us; t_low0=78.1us; t_slot=86.8us
++ */
++#define W1_SERIAL_STD_RESET_BYTE   0xF0
++#define W1_SERIAL_STD_RESET_BAUD   9600u
++#define W1_SERIAL_STD_DATA_BAUD    115200u
++
++/*
++ * Overdrive speed signal parameters:
++ * RST: t_RSTL=52.1us; t_slot=86.8us
++ * DATA: t_low1=1.0us; t_low0=9.0us; t_slot=10.0us
++ */
++#define W1_SERIAL_OD_RESET_BYTE    0xE0
++#define W1_SERIAL_OD_RESET_BAUD    115200u
++#define W1_SERIAL_OD_DATA_BAUD     1000000u
++
++struct w1_serial_config {
++	/** w1 controller config, common to all drivers */
++	struct w1_controller_config ctrl_config;
++	/** UART device used for 1-Wire communication */
++	const struct device *uart_dev;
++};
++
++struct w1_serial_data {
++	/** w1 controller data, common to all drivers */
++	struct w1_controller_data ctrl_data;
++	struct uart_config uart_cfg;
++	bool overdrive_active;
++};
++
++/*
++ * Concurrently transmits and receives one 1-Wire bit
++ * by sending and receiving one uart byte
++ */
++static int serial_tx_rx(const struct device *dev, const uint8_t *tx_data,
++			uint8_t *rx_data, size_t len, uint32_t timeout)
++{
++	const struct w1_serial_config *cfg = dev->config;
++	uint64_t end;
++	uint8_t dummy;
++	int ret = 0;
++
++	__ASSERT_NO_MSG(tx_data != NULL);
++	__ASSERT_NO_MSG(rx_data != NULL);
++
++	for (int i = 0; i < len; ++i) {
++		while (uart_poll_in(cfg->uart_dev, &dummy) == 0) {
++			/* poll in any buffered data */
++		}
++
++		uart_poll_out(cfg->uart_dev, tx_data[i]);
++		end = sys_clock_timeout_end_calc(K_USEC(timeout));
++
++		do {
++			ret = uart_poll_in(cfg->uart_dev, &rx_data[i]);
++		} while (ret != 0 && end > k_uptime_ticks());
++	}
++
++	return ret;
++}
++
++/* Concurretly tranmits and receives one 1-Wire byte */
++static int serial_tx_rx_byte(const struct device *dev, uint8_t tx_byte,
++				 uint8_t *rx_byte)
++{
++	__ASSERT_NO_MSG(rx_byte != NULL);
++	uint8_t byte_representation[8];
++
++	for (int i = 0; i < 8; ++i) {
++		/*
++		 * Transmitting 0xFF the uart start bit pulls the line low to
++		 * indicate either write Bit 1, or read low time.
++		 * Write Bit 0 is represented as 0x00
++		 */
++		byte_representation[i] = ((tx_byte & (1 << i)) != 0) ? 0xFF : 0x00;
++	}
++
++	if (serial_tx_rx(dev, &byte_representation[0], &byte_representation[0],
++			 8, CONFIG_W1_ZEPHYR_SERIAL_BIT_TIMEOUT) < 0) {
++		return -EIO;
++	}
++
++	*rx_byte = 0;
++	for (int i = 0; i < 8; ++i) {
++		/*
++		 * rx-byte different from 0xFF indicates that a peripheral has
++		 * pulled line low to transmit a 0 bit, otherwise a 1 bit.
++		 */
++		*rx_byte |= (uint8_t)(byte_representation[i] == 0xFF) << i;
++	}
++
++	return 0;
++}
++
++static int w1_serial_reset_bus(const struct device *dev)
++{
++	const struct w1_serial_config *cfg = dev->config;
++	struct w1_serial_data *data = dev->data;
++	uint8_t reset_byte = data->overdrive_active ?
++			     W1_SERIAL_OD_RESET_BYTE : W1_SERIAL_STD_RESET_BYTE;
++	/* reset uses 115200/9600=12 slower baudrate,
++	 * adjust timeout accordingly, also valid for overdrive speed.
++	 */
++	const uint32_t reset_timeout = CONFIG_W1_ZEPHYR_SERIAL_BIT_TIMEOUT * 12;
++
++	data->uart_cfg.baudrate = data->overdrive_active ?
++			W1_SERIAL_OD_RESET_BAUD : W1_SERIAL_STD_RESET_BAUD;
++	if (uart_configure(cfg->uart_dev, &data->uart_cfg) != 0) {
++		LOG_ERR("Failed set baud rate for reset pulse");
++		return -EIO;
++	}
++
++	if (serial_tx_rx(dev, &reset_byte, &reset_byte, 1, reset_timeout) < 0) {
++		LOG_ERR("tx_rx_error reset_present");
++		return -EIO;
++	}
++
++	data->uart_cfg.baudrate = data->overdrive_active ?
++			W1_SERIAL_OD_DATA_BAUD : W1_SERIAL_STD_DATA_BAUD;
++	if (uart_configure(cfg->uart_dev, &data->uart_cfg) != 0) {
++		LOG_ERR("Failed set baud rate for data transfer");
++		return -EIO;
++	}
++
++	/* At least 1 device is present on bus, if reset_byte is different
++	 * from 0xF0. But Bus probably shorted if reset_byte is 0x00.
++	 */
++	return (reset_byte != W1_SERIAL_STD_RESET_BYTE) && (reset_byte != 0x00);
++}
++
++static int w1_serial_read_bit(const struct device *dev)
++{
++	uint8_t tx_bit = W1_SERIAL_READ_REQ_BYTE;
++	uint8_t rx_bit;
++
++	if (serial_tx_rx(dev, &tx_bit, &rx_bit, 1,
++			 CONFIG_W1_ZEPHYR_SERIAL_BIT_TIMEOUT) != 0) {
++		return -EIO;
++	};
++
++	return rx_bit == W1_SERIAL_READ_REQ_BYTE;
++}
++
++static int w1_serial_write_bit(const struct device *dev, const bool bit)
++{
++	uint8_t tx_bit;
++	uint8_t rx_bit;
++
++	tx_bit = bit ? W1_SERIAL_BIT_1 : W1_SERIAL_BIT_0;
++	if (serial_tx_rx(dev, &tx_bit, &rx_bit, 1,
++			 CONFIG_W1_ZEPHYR_SERIAL_BIT_TIMEOUT) != 0) {
++		return -EIO;
++	}
++	return 0;
++}
++
++static int w1_serial_read_byte(const struct device *dev)
++{
++	uint8_t tx_byte = 0xFF;
++	uint8_t rx_byte;
++
++	if (serial_tx_rx_byte(dev, tx_byte, &rx_byte) != 0) {
++		return -EIO;
++	}
++
++	return rx_byte;
++}
++
++static int w1_serial_write_byte(const struct device *dev, const uint8_t byte)
++{
++	uint8_t rx_byte;
++
++	return serial_tx_rx_byte(dev, byte, &rx_byte);
++}
++
++static int w1_serial_configure(const struct device *dev,
++			 enum w1_driver_settings_type type,
++			 uint32_t value)
++{
++	const struct w1_serial_config *cfg = dev->config;
++	struct w1_serial_data *data = dev->data;
++	int ret = 0;
++	bool temp;
++
++	switch (type) {
++	case W1_SETTING_SPEED:
++		temp = (bool)value;
++		if (temp == data->overdrive_active) {
++			break;
++		}
++
++		data->overdrive_active = temp;
++		data->uart_cfg.baudrate = data->overdrive_active ?
++				W1_SERIAL_OD_DATA_BAUD : W1_SERIAL_STD_DATA_BAUD;
++		if (uart_configure(cfg->uart_dev, &data->uart_cfg) != 0) {
++			LOG_ERR("Failed set baud rate for data transfer");
++			ret = -EIO;
++		}
++		break;
++	default:
++		ret = -ENOTSUP;
++	}
++	return ret;
++}
++
++static int w1_serial_init(const struct device *dev)
++{
++	const struct w1_serial_config *cfg = dev->config;
++	struct w1_serial_data *data = dev->data;
++
++	if (!device_is_ready(cfg->uart_dev)) {
++		LOG_ERR("Serial device not ready");
++		return -ENODEV;
++	}
++
++	data->uart_cfg.baudrate = W1_SERIAL_STD_DATA_BAUD;
++	data->uart_cfg.parity = UART_CFG_PARITY_NONE;
++	data->uart_cfg.data_bits = UART_CFG_DATA_BITS_8;
++	data->uart_cfg.stop_bits = UART_CFG_STOP_BITS_1;
++	data->uart_cfg.flow_ctrl = UART_CFG_FLOW_CTRL_NONE;
++
++	if (uart_configure(cfg->uart_dev, &data->uart_cfg) != 0) {
++		LOG_ERR("Failed to configure UART");
++		return -EINVAL;
++	}
++
++	data->overdrive_active = false;
++
++	LOG_DBG("w1-serial initialized, with %d peripheral devices",
++		cfg->ctrl_config.client_count);
++	return 0;
++}
++
++static const struct w1_driver_api w1_serial_driver_api = {
++	.reset_bus = w1_serial_reset_bus,
++	.read_bit = w1_serial_read_bit,
++	.write_bit = w1_serial_write_bit,
++	.read_byte = w1_serial_read_byte,
++	.write_byte = w1_serial_write_byte,
++	.configure = w1_serial_configure,
++};
++
++#define W1_ZEPHYR_SERIAL_INIT(inst)					   \
++static const struct w1_serial_config w1_serial_cfg_##inst = {		   \
++	.uart_dev = DEVICE_DT_GET(DT_INST_BUS(inst)),			   \
++	.ctrl_config.client_count = W1_INST_PERIPHERALS_COUNT(inst)	   \
++};									   \
++static struct w1_serial_data w1_serial_data_##inst = {};		   \
++DEVICE_DT_INST_DEFINE(inst, &w1_serial_init, NULL, &w1_serial_data_##inst, \
++		      &w1_serial_cfg_##inst, POST_KERNEL,		   \
++		      CONFIG_W1_INIT_PRIORITY, &w1_serial_driver_api);	   \
++
++DT_INST_FOREACH_STATUS_OKAY(W1_ZEPHYR_SERIAL_INIT)
+diff --git a/dts/bindings/w1/zephyr,w1-serial.yaml b/dts/bindings/w1/zephyr,w1-serial.yaml
+new file mode 100644
+index 000000000000..9e6a5efd377b
+--- /dev/null
++++ b/dts/bindings/w1/zephyr,w1-serial.yaml
+@@ -0,0 +1,15 @@
++# Copyright (c) 2022 Thomas Stranger
++# SPDX-License-Identifier: Apache-2.0
++
++# Properties for the 1-Wire serial driver:
++# No GPIOs need to be configured here, as this is already done in the serial
++# driver. Typically 2 IOs are needed, but some microcontrollers have
++# the option for a "single-wire Half-duplex" mode, where the TX and RX lines
++# are internally connected, such that only a single IO
++# needs to be allocated for the 1-Wire communication.
++
++description: W1 over serial line device
++
++compatible: "zephyr,w1-serial"
++
++include: [uart-device.yaml, w1-controller.yaml]
+
+From f0d2e01c52b1601e5b2876d2d789925009391f2b Mon Sep 17 00:00:00 2001
+From: Thomas Stranger <thomas.stranger@outlook.com>
+Date: Thu, 8 Jul 2021 14:51:24 +0200
+Subject: [PATCH 05/11] tests: drivers: w1: add basic api test
+
+This commit adds basic api tests for the w1 driver.
+
+These tests mostly make sure that everything compiles without
+errors. They expect a w1-bus configuration without any connected device.
+No bidirectional read/write tests are executed.
+Send tests simply send without verifying the output,
+and receive tests expect an idle bus(receiving only logical ones).
+
+Signed-off-by: Thomas Stranger <thomas.stranger@outlook.com>
+---
+ boards/arm/nucleo_g071rb/nucleo_g071rb.yaml   |   1 +
+ tests/drivers/w1/w1_api/CMakeLists.txt        |   8 +
+ .../w1_api/boards/nrf52840dk_nrf52840.overlay |  22 ++
+ .../w1/w1_api/boards/nucleo_g0b1re.overlay    |  18 ++
+ .../w1/w1_api/boards/serial_overlay.dtsi      |  31 +++
+ .../dts/bindings/test,w1-dummy-device.yaml    |   8 +
+ tests/drivers/w1/w1_api/prj.conf              |   3 +
+ tests/drivers/w1/w1_api/src/main.c            |  38 +++
+ tests/drivers/w1/w1_api/src/test_w1.c         | 241 ++++++++++++++++++
+ tests/drivers/w1/w1_api/src/w1_dummy_device.c |  27 ++
+ tests/drivers/w1/w1_api/testcase.yaml         |   9 +
+ 11 files changed, 406 insertions(+)
+ create mode 100644 tests/drivers/w1/w1_api/CMakeLists.txt
+ create mode 100644 tests/drivers/w1/w1_api/boards/nrf52840dk_nrf52840.overlay
+ create mode 100644 tests/drivers/w1/w1_api/boards/nucleo_g0b1re.overlay
+ create mode 100644 tests/drivers/w1/w1_api/boards/serial_overlay.dtsi
+ create mode 100644 tests/drivers/w1/w1_api/dts/bindings/test,w1-dummy-device.yaml
+ create mode 100644 tests/drivers/w1/w1_api/prj.conf
+ create mode 100644 tests/drivers/w1/w1_api/src/main.c
+ create mode 100644 tests/drivers/w1/w1_api/src/test_w1.c
+ create mode 100644 tests/drivers/w1/w1_api/src/w1_dummy_device.c
+ create mode 100644 tests/drivers/w1/w1_api/testcase.yaml
+
+diff --git a/boards/arm/nucleo_g071rb/nucleo_g071rb.yaml b/boards/arm/nucleo_g071rb/nucleo_g071rb.yaml
+index 991b4484fb14..36031a4da0ce 100644
+--- a/boards/arm/nucleo_g071rb/nucleo_g071rb.yaml
++++ b/boards/arm/nucleo_g071rb/nucleo_g071rb.yaml
+@@ -12,6 +12,7 @@ supported:
+   - arduino_gpio
+   - arduino_i2c
+   - arduino_spi
++  - arduino_serial
+   - uart
+   - gpio
+   - i2c
+diff --git a/tests/drivers/w1/w1_api/CMakeLists.txt b/tests/drivers/w1/w1_api/CMakeLists.txt
+new file mode 100644
+index 000000000000..3e52609a98d5
+--- /dev/null
++++ b/tests/drivers/w1/w1_api/CMakeLists.txt
+@@ -0,0 +1,8 @@
++# SPDX-License-Identifier: Apache-2.0
++
++cmake_minimum_required(VERSION 3.13.1)
++find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
++project(w1_api)
++
++FILE(GLOB app_sources src/*.c)
++target_sources(app PRIVATE ${app_sources})
+diff --git a/tests/drivers/w1/w1_api/boards/nrf52840dk_nrf52840.overlay b/tests/drivers/w1/w1_api/boards/nrf52840dk_nrf52840.overlay
+new file mode 100644
+index 000000000000..380a81e88636
+--- /dev/null
++++ b/tests/drivers/w1/w1_api/boards/nrf52840dk_nrf52840.overlay
+@@ -0,0 +1,22 @@
++/*
++ * Copyright (c) 2022 Thomas Stranger
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include "serial_overlay.dtsi"
++
++/* external connection of TX-pin to RX-pin needed */
++&pinctrl {
++	uart1_default: uart1_default {
++		group1 {
++			psels = <NRF_PSEL(UART_RX, 1, 1)>;
++			bias-pull-up;
++		};
++		group2 {
++			psels = <NRF_PSEL(UART_TX, 1, 2)>;
++			/* max. 5mA drive strength: */
++			drive-mode = <NRF_DRIVE_H0D1>;
++		};
++	};
++};
+diff --git a/tests/drivers/w1/w1_api/boards/nucleo_g0b1re.overlay b/tests/drivers/w1/w1_api/boards/nucleo_g0b1re.overlay
+new file mode 100644
+index 000000000000..fe25574cda9a
+--- /dev/null
++++ b/tests/drivers/w1/w1_api/boards/nucleo_g0b1re.overlay
+@@ -0,0 +1,18 @@
++/*
++ * Copyright (c) 2022 Thomas Stranger
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include "serial_overlay.dtsi"
++
++&usart1_tx_pc4 {
++	/*
++	 * enable open-drain drive such that no external push-pull to
++	 * open-drain converter is required. An external pull-up resistor
++	 * with approximately R=5k resistance is suggested.
++	 * Also a fixture connecting tx and rx pin is needed.
++	 */
++	drive-open-drain;
++	bias-pull-up;
++};
+diff --git a/tests/drivers/w1/w1_api/boards/serial_overlay.dtsi b/tests/drivers/w1/w1_api/boards/serial_overlay.dtsi
+new file mode 100644
+index 000000000000..2bd64abdf3d1
+--- /dev/null
++++ b/tests/drivers/w1/w1_api/boards/serial_overlay.dtsi
+@@ -0,0 +1,31 @@
++/*
++ * Copyright (c) 2022 Thomas Stranger
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++&arduino_serial {
++	status = "okay";
++
++	w1-zephyr-serial-0 {
++		compatible = "zephyr,w1-serial";
++		#address-cells = <1>;
++		#size-cells = <0>;
++		label = "W1_0";
++		status = "okay";
++
++		dummy-device-1 {
++			compatible = "test-w1-dummy-device";
++			family-code = <0x28>;
++			label = "DUMMY_DEVICE_1";
++			status = "okay";
++		};
++
++		dummy-device-2 {
++			compatible = "test-w1-dummy-device";
++			family-code = <0x29>;
++			label = "DUMMY_DEVICE_2";
++			status = "okay";
++		};
++	};
++};
+diff --git a/tests/drivers/w1/w1_api/dts/bindings/test,w1-dummy-device.yaml b/tests/drivers/w1/w1_api/dts/bindings/test,w1-dummy-device.yaml
+new file mode 100644
+index 000000000000..62ea4759235d
+--- /dev/null
++++ b/tests/drivers/w1/w1_api/dts/bindings/test,w1-dummy-device.yaml
+@@ -0,0 +1,8 @@
++# Copyright (c) 2022, Thomas Stranger
++# SPDX-License-Identifier: Apache-2.0
++
++description: 1-Wire dummy device
++
++compatible: "test-w1-dummy-device"
++
++include: w1-device.yaml
+diff --git a/tests/drivers/w1/w1_api/prj.conf b/tests/drivers/w1/w1_api/prj.conf
+new file mode 100644
+index 000000000000..44a7057de64c
+--- /dev/null
++++ b/tests/drivers/w1/w1_api/prj.conf
+@@ -0,0 +1,3 @@
++CONFIG_ZTEST=y
++CONFIG_W1=y
++CONFIG_TEST_USERSPACE=y
+diff --git a/tests/drivers/w1/w1_api/src/main.c b/tests/drivers/w1/w1_api/src/main.c
+new file mode 100644
+index 000000000000..41da73decb16
+--- /dev/null
++++ b/tests/drivers/w1/w1_api/src/main.c
+@@ -0,0 +1,38 @@
++/*
++ * Copyright (c) 2022 Thomas Stranger
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <zephyr.h>
++#include <ztest.h>
++
++extern void test_w1_basic(void);
++extern void test_w1_crc(void);
++extern void test_w1_rom(void);
++extern void test_w1_reset_empty(void);
++extern void test_w1_search_empty(void);
++extern void test_w1_fire_and_forget(void);
++extern void test_w1_receive_nothing(void);
++extern void test_w1_peripheral(void);
++
++extern void test_w1_simple(void);
++extern const struct device *get_w1_controller_dev(void);
++extern const struct device *get_w1_dummy_device_1(void);
++extern const struct device *get_w1_dummy_device_2(void);
++
++void test_main(void)
++{
++	k_object_access_grant(get_w1_controller_dev(), k_current_get());
++
++	ztest_test_suite(w1_api_test,
++			 ztest_user_unit_test(test_w1_basic),
++			 ztest_user_unit_test(test_w1_crc),
++			 ztest_user_unit_test(test_w1_rom),
++			 ztest_user_unit_test(test_w1_reset_empty),
++			 ztest_user_unit_test(test_w1_search_empty),
++			 ztest_user_unit_test(test_w1_fire_and_forget),
++			 ztest_user_unit_test(test_w1_receive_nothing),
++			 ztest_user_unit_test(test_w1_peripheral));
++	ztest_run_test_suite(w1_api_test);
++}
+diff --git a/tests/drivers/w1/w1_api/src/test_w1.c b/tests/drivers/w1/w1_api/src/test_w1.c
+new file mode 100644
+index 000000000000..ab9978188509
+--- /dev/null
++++ b/tests/drivers/w1/w1_api/src/test_w1.c
+@@ -0,0 +1,241 @@
++/*
++ * Copyright (c) 2022 Thomas Stranger
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <drivers/w1.h>
++#include <zephyr.h>
++#include <ztest.h>
++
++#define W1_DUMMY_DEVICE_1 DT_INST(0, test_w1_dummy_device)
++#define W1_DUMMY_DEVICE_2 DT_INST(1, test_w1_dummy_device)
++
++#define ZEPHYR_W1_SERIAL DT_INST(0, zephyr_w1_serial)
++
++#if DT_NODE_HAS_STATUS(ZEPHYR_W1_SERIAL, okay)
++#define W1_CONTROLLER ZEPHYR_W1_SERIAL
++#else
++#error Your devicetree has no enabled nodes with a compatible w1-driver
++#endif
++
++const struct device *get_w1_controller_dev(void)
++{
++	const struct device *dev = DEVICE_DT_GET(W1_CONTROLLER);
++
++	zassert_true(device_is_ready(dev), "W1 controller not found");
++
++	return dev;
++}
++
++const struct device *get_w1_dummy_device_1(void)
++{
++	const struct device *dev = DEVICE_DT_GET(W1_DUMMY_DEVICE_1);
++
++	zassert_true(device_is_ready(dev), "W1 dummy device 1 not found");
++
++	return dev;
++}
++
++const struct device *get_w1_dummy_device_2(void)
++{
++	const struct device *dev = DEVICE_DT_GET(W1_DUMMY_DEVICE_2);
++
++	zassert_true(device_is_ready(dev), "W1 dummy device 2 not found");
++
++	return dev;
++}
++
++/* test vectors: */
++const uint8_t rom_01_bytes[] = { 0x2d, 0x18, 0x08, 0xf5, 0x2d, 0x00, 0x00, 0x67 };
++const uint8_t rom_02_bytes[] = { 0x2d, 0x2d, 0xfc, 0xf4, 0x2d, 0x00, 0x00, 0x57 };
++const uint8_t rom_03_bytes[] = { 0x2d, 0xa8, 0xdc, 0xf2, 0x2d, 0x00, 0x00, 0xa7 };
++
++const uint64_t rom_01_64 = 0x2d1808f52d000067;
++const uint64_t rom_02_64 = 0x2d2dfcf42d000057;
++const uint64_t rom_03_64 = 0x2da8dcf22d0000a7;
++
++const struct w1_rom rom_01 = {
++	.family = 0x2d,
++	.serial = { 0x18, 0x08, 0xf5, 0x2d, 0x00, 0x00 },
++	.crc = 0x67,
++};
++const struct w1_rom rom_02 = {
++	.family = 0x2d,
++	.serial = { 0x2d, 0xfc, 0xf4, 0x2d, 0x00, 0x00 },
++	.crc = 0x57,
++};
++const struct w1_rom rom_03 = {
++	.family = 0x2d,
++	.serial = { 0xa8, 0xdc, 0xf2, 0x2d, 0x00, 0x00 },
++	.crc = 0xa7,
++};
++
++const uint8_t crc16_1_in[11] = { 0x0f, 0x00, 0x00, 0xff, 0xee, 0xdd,
++				 0xcc, 0xdd, 0xcc, 0xbb, 0xff };
++const uint16_t crc16_1 = 0x60bb;
++const uint8_t crc16_2_in[11] = { 0x0f, 0x08, 0x00, 0xaa, 0xbb, 0xcc,
++				 0xdd, 0xaa, 0xbb, 0xcc, 0xdd };
++const uint16_t crc16_2 = 0x8909;
++const uint8_t crc16_3_in[12] = { 0xaa, 0x00, 0x00, 0x07, 0x00, 0x00,
++				 0x00, 0xcc, 0xaa, 0xbb, 0xcc, 0xdd };
++const uint16_t crc16_3 = 0x5d69;
++
++void test_w1_basic(void)
++{
++	const struct device *w1_dev = get_w1_controller_dev();
++	size_t peripheral_count;
++
++	zassert_equal(w1_lock_bus(w1_dev), 0, "Fail lock 1");
++	zassert_equal(w1_lock_bus(w1_dev), 0, "Fail lock 2");
++	zassert_equal(w1_unlock_bus(w1_dev), 0, "Fail unlock 1");
++	zassert_equal(w1_unlock_bus(w1_dev), 0, "Fail unlock 2");
++
++	peripheral_count = w1_get_peripheral_count(w1_dev);
++	zassert_equal(peripheral_count, 2,
++		      "peripheral_count does not match dt definitions: %u/2",
++		      peripheral_count);
++}
++
++void test_w1_crc(void)
++{
++	uint8_t crc8_result;
++	uint16_t crc16_result;
++
++	/* crc8 */
++	crc8_result = w1_crc8(rom_01_bytes, 8);
++	zassert_equal(crc8_result, 0, "crc1: crc over complete rom not 0");
++
++	crc8_result = w1_crc8(rom_02_bytes, 8);
++	zassert_equal(crc8_result, 0, "crc2: crc over complete rom not 0");
++
++	crc8_result = w1_crc8(rom_03_bytes, 7);
++	zassert_equal(crc8_result, rom_03_bytes[7], "crc3 does not match");
++
++	/* crc16 */
++	crc16_result = w1_crc16(W1_CRC16_SEED, crc16_1_in, sizeof(crc16_1_in));
++	zassert_equal(crc16_result, crc16_1, "crc16_1 does not match");
++
++	crc16_result = w1_crc16(W1_CRC16_SEED, crc16_2_in, sizeof(crc16_2_in));
++	zassert_equal(crc16_result, crc16_2, "crc16_2 does not match");
++
++	crc16_result = w1_crc16(W1_CRC16_SEED, crc16_3_in, sizeof(crc16_3_in));
++	zassert_equal(crc16_result, crc16_3, "crc16_3 does not match");
++}
++
++void test_w1_rom(void)
++{
++	struct w1_rom rom_x;
++	uint64_t rom_x_64 = -1;
++
++	rom_x_64 = w1_rom_to_uint64(&rom_01);
++	zassert_equal(rom_01_64, rom_x_64,
++		      "rom_01_struct converted to uint64 does not match");
++	rom_x_64 = w1_rom_to_uint64(&rom_02);
++	zassert_equal(rom_02_64, rom_x_64,
++		      "rom_02_struct converted to uint64 does not match");
++
++	w1_uint64_to_rom(rom_01_64, &rom_x);
++	zassert_mem_equal(&rom_x, &rom_01, sizeof(rom_01),
++			  "rom_01_64 converted to rom struct does not match");
++	w1_uint64_to_rom(rom_03_64, &rom_x);
++	zassert_mem_equal(&rom_x, &rom_03, sizeof(rom_03),
++			  "rom_03_64 converted to rom struct does not match");
++}
++
++void test_w1_reset_empty(void)
++{
++	int ret;
++	const struct device *w1_dev = get_w1_controller_dev();
++
++	ret = w1_reset_bus(w1_dev);
++	zassert_false((ret < 0), "w1_reset failed. Err: %d", ret);
++	zassert_equal(ret, 0, "In case no devices are connected should return 0");
++}
++
++int found_w1_devices;
++
++void w1_test_search_callback(struct w1_rom found_rom, void *callback_arg)
++{
++	ARG_UNUSED(found_rom);
++	ARG_UNUSED(callback_arg);
++	found_w1_devices++;
++}
++
++void test_w1_search_empty(void)
++{
++	int ret;
++	const struct device *w1_dev = get_w1_controller_dev();
++
++	ret = w1_search_rom(w1_dev, 0, 0);
++	zassert_equal(ret, 0, "In case no devices are connected should return 0");
++
++	ret = w1_search_alarm(w1_dev, 0, 0);
++	zassert_equal(ret, 0, "In case no devices are connected should return 0");
++}
++
++void test_w1_fire_and_forget(void)
++{
++	int ret;
++	const struct device *w1_dev = get_w1_controller_dev();
++	const uint8_t block_send[8] = { 0x0F, 0x0E, 0x0D, 0x0C, 0xC0, 0xD0, 0xE0, 0xF0 };
++
++	ret = w1_write_bit(w1_dev, false);
++	zassert_equal(ret, 0, "write_bit: error: %d", ret);
++
++	ret = w1_write_byte(w1_dev, 0x3b);
++	zassert_equal(ret, 0, "write_byte: error: %d", ret);
++
++	ret = w1_write_block(w1_dev, block_send, sizeof(block_send));
++	zassert_equal(ret, 0, "write_block: error: %d", ret);
++}
++
++void test_w1_receive_nothing(void)
++{
++	int ret;
++	const struct device *w1_dev = get_w1_controller_dev();
++	uint8_t block_rcv[8] = { 0x0F, 0x0E, 0x0D, 0x0C, 0xC0, 0xD0, 0xE0, 0xF0 };
++	const uint8_t block_ref[8] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
++
++	/* on idle bus without sender all received bits should be logical ones */
++
++	ret = w1_read_bit(w1_dev);
++	zassert_true((ret >= 0), "read_bit: error: %d", ret);
++	zassert_equal(ret, 1, "bit: empty receive should be logical ones");
++
++	ret = w1_read_byte(w1_dev);
++	zassert_true((ret >= 0), "read_byte: error: %d", ret);
++	zassert_equal(ret, 0xFF, "byte: empty receive should be logical 0xFF");
++
++	ret = w1_read_block(w1_dev, block_rcv, sizeof(block_rcv));
++	zassert_equal(ret, 0, "read_block: error: %d", ret);
++	zassert_mem_equal(block_rcv, block_ref, sizeof(block_rcv),
++			  "block: empty receive should be local all 0xFF");
++}
++
++void test_w1_peripheral(void)
++{
++	int ret;
++	struct w1_config cfg_1 = { .rom_id = {} };
++	const struct device *w1_dev = get_w1_controller_dev();
++	const uint8_t block_send[8] = { 0x0F, 0x0E, 0x0D, 0x0C, 0xC0, 0xD0, 0xE0, 0xF0 };
++	uint8_t block_rcv[8] = { 0x00 };
++
++	ret = w1_read_rom(w1_dev, &cfg_1.rom_id);
++	zassert_equal(ret, -ENODEV, "read_rom should fail w/o connected dev");
++
++	ret = w1_match_rom(w1_dev, &cfg_1);
++	zassert_equal(ret, -ENODEV, "match_rom should fail w/o connected dev");
++
++	ret = w1_resume_command(w1_dev);
++	zassert_equal(ret, -ENODEV, "resume command should fail w/o connected dev");
++
++	ret = w1_skip_rom(w1_dev, &cfg_1);
++	zassert_equal(ret, -ENODEV, "skip_rom should fail w/o connected dev");
++
++	ret = w1_reset_select(w1_dev, &cfg_1);
++	zassert_equal(ret, -ENODEV, "reset_select should fail w/o connected dev");
++
++	ret = w1_write_read(w1_dev, &cfg_1, block_send, 8, block_rcv, 0);
++	zassert_equal(ret, -ENODEV, "w1_write_read should fail w/o connected dev");
++}
+diff --git a/tests/drivers/w1/w1_api/src/w1_dummy_device.c b/tests/drivers/w1/w1_api/src/w1_dummy_device.c
+new file mode 100644
+index 000000000000..e63740f237b2
+--- /dev/null
++++ b/tests/drivers/w1/w1_api/src/w1_dummy_device.c
+@@ -0,0 +1,27 @@
++/*
++ * Copyright (c) 2022 Thomas Stranger
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#define DT_DRV_COMPAT test_w1_dummy_device
++
++#include <device.h>
++#include <drivers/w1.h>
++
++struct w1_dummy_api {
++};
++
++static const struct w1_dummy_api w1_dummy_api1 = {};
++
++static int w1_dummy_init(const struct device *dev)
++{
++	return 0;
++}
++
++#define TEST_W1_DUMMY_DEVICE_DEFINE(inst)				\
++	DEVICE_DT_INST_DEFINE(inst, w1_dummy_init, NULL, NULL, NULL,	\
++			      POST_KERNEL, CONFIG_W1_INIT_PRIORITY,	\
++			      &w1_dummy_api1);
++
++DT_INST_FOREACH_STATUS_OKAY(TEST_W1_DUMMY_DEVICE_DEFINE)
+diff --git a/tests/drivers/w1/w1_api/testcase.yaml b/tests/drivers/w1/w1_api/testcase.yaml
+new file mode 100644
+index 000000000000..72fff05ccd6d
+--- /dev/null
++++ b/tests/drivers/w1/w1_api/testcase.yaml
+@@ -0,0 +1,9 @@
++common:
++  tags: drivers w1 userspace
++  harness: ztest
++  harness_config:
++    fixture: w1_serial_idle
++tests:
++  drivers.w1.w1-serial:
++    filter: dt_compat_enabled("zephyr,w1-serial")
++    platform_allow: nucleo_g0b1re nrf52840dk_nrf52840
+
+From 390c572b37eff67fdd442b085929367b4315ee82 Mon Sep 17 00:00:00 2001
+From: Thomas Stranger <thomas.stranger@outlook.com>
+Date: Tue, 16 Nov 2021 23:23:35 +0100
+Subject: [PATCH 06/11] drivers: sensor: extend with w1 api for ROM config
+
+This commit adds a sensor attribute and helper functions such that
+the ROM ID of 1-Wire devices can easily configured.
+
+Signed-off-by: Thomas Stranger <thomas.stranger@outlook.com>
+---
+ include/drivers/sensor/w1_sensor.h | 72 ++++++++++++++++++++++++++++++
+ 1 file changed, 72 insertions(+)
+ create mode 100644 include/drivers/sensor/w1_sensor.h
+
+diff --git a/include/drivers/sensor/w1_sensor.h b/include/drivers/sensor/w1_sensor.h
+new file mode 100644
+index 000000000000..da639a9777ba
+--- /dev/null
++++ b/include/drivers/sensor/w1_sensor.h
+@@ -0,0 +1,72 @@
++/*
++ * Copyright (c) 2022, Thomas Stranger
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++/**
++ * @file
++ * @brief Extended public API for 1-Wire Sensors
++ *
++ * This header file exposes an attribute an helper function to allow the
++ * runtime configuration of ROM IDs for 1-Wire Sensors.
++ */
++
++#ifndef ZEPHYR_INCLUDE_DRIVERS_SENSOR_W1_SENSOR_H_
++#define ZEPHYR_INCLUDE_DRIVERS_SENSOR_W1_SENSOR_H_
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++#include <drivers/sensor.h>
++#include <drivers/w1.h>
++
++/**
++ * @brief 1-Wire Sensor API
++ * @defgroup w1_sensor 1-Wire Sensor API
++ * @ingroup w1_interface
++ * @{
++ */
++
++enum sensor_attribute_w1 {
++	/** 1-Wire ROM ID */
++	SENSOR_ATTR_W1_ROM_ID = SENSOR_ATTR_PRIV_START,
++};
++
++/**
++ * @brief Function to write a w1_rom struct to an sensor value ptr.
++ *
++ * @param rom  Pointer to the rom struct.
++ * @param val  Pointer to the sensor value.
++ */
++static inline void w1_rom_to_sensor_value(const struct w1_rom *rom,
++					  struct sensor_value *val)
++{
++	val->val1 = sys_get_be64((uint8_t *)rom) & BIT64_MASK(32);
++	val->val2 = sys_get_be64((uint8_t *)rom) >> 32;
++}
++
++/**
++ * @brief Function to write an rom id stored in a sensor value to a struct w1_rom ptr.
++ *
++ * @param val  Sensor_value representing the rom.
++ * @param rom  The rom struct ptr.
++ */
++static inline void w1_sensor_value_to_rom(const struct sensor_value *val,
++					  struct w1_rom *rom)
++{
++	uint64_t temp64 = ((uint64_t)val->val2 << 32) | val->val1;
++
++	sys_put_be64(temp64, (uint8_t *)rom);
++}
++
++/**
++ * @}
++ */
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* ZEPHYR_INCLUDE_DRIVERS_SENSOR_W1_SENSOR_H_ */
+
+From 3597f2c5cf357f6ae40ee1e00ac26ba688675ce8 Mon Sep 17 00:00:00 2001
+From: Thomas Stranger <thomas.stranger@outlook.com>
+Date: Thu, 8 Jul 2021 14:56:47 +0200
+Subject: [PATCH 07/11] drivers: sensor: add support for ds18b20 1-wire
+ temperatue sensor
+
+This commit adds support for the ds18b20 1-wire temperature sensor.
+
+The sampling resolution of the sensor can be set in DT.
+In case only a single device is on the bus, the driver issues
+skip_rom commands. However, in case DT defines several devices,
+the driver will use match_rom commands and therefore it is necessary
+to set the rom_id of the device via the sensor attribute interface before
+being able to sample sensor values.
+
+Signed-off-by: Thomas Stranger <thomas.stranger@outlook.com>
+---
+ drivers/sensor/CMakeLists.txt          |   1 +
+ drivers/sensor/Kconfig                 |   2 +
+ drivers/sensor/ds18b20/CMakeLists.txt  |   5 +
+ drivers/sensor/ds18b20/Kconfig         |  10 +
+ drivers/sensor/ds18b20/ds18b20.c       | 259 +++++++++++++++++++++++++
+ drivers/sensor/ds18b20/ds18b20.h       |  68 +++++++
+ dts/bindings/sensor/maxim,ds18b20.yaml |  16 ++
+ 7 files changed, 361 insertions(+)
+ create mode 100644 drivers/sensor/ds18b20/CMakeLists.txt
+ create mode 100644 drivers/sensor/ds18b20/Kconfig
+ create mode 100644 drivers/sensor/ds18b20/ds18b20.c
+ create mode 100644 drivers/sensor/ds18b20/ds18b20.h
+ create mode 100644 dts/bindings/sensor/maxim,ds18b20.yaml
+
+diff --git a/drivers/sensor/CMakeLists.txt b/drivers/sensor/CMakeLists.txt
+index d75cb527f274..ba742e418006 100644
+--- a/drivers/sensor/CMakeLists.txt
++++ b/drivers/sensor/CMakeLists.txt
+@@ -21,6 +21,7 @@ add_subdirectory_ifdef(CONFIG_BQ274XX		bq274xx)
+ add_subdirectory_ifdef(CONFIG_CCS811		ccs811)
+ add_subdirectory_ifdef(CONFIG_DHT			dht)
+ add_subdirectory_ifdef(CONFIG_DPS310		dps310)
++add_subdirectory_ifdef(CONFIG_DS18B20		ds18b20)
+ add_subdirectory_ifdef(CONFIG_ENS210		ens210)
+ add_subdirectory_ifdef(CONFIG_FDC2X1X		fdc2x1x)
+ add_subdirectory_ifdef(CONFIG_FXAS21002		fxas21002)
+diff --git a/drivers/sensor/Kconfig b/drivers/sensor/Kconfig
+index f54f201e1db3..7e61fa95370c 100644
+--- a/drivers/sensor/Kconfig
++++ b/drivers/sensor/Kconfig
+@@ -80,6 +80,8 @@ source "drivers/sensor/dht/Kconfig"
+ 
+ source "drivers/sensor/dps310/Kconfig"
+ 
++source "drivers/sensor/ds18b20/Kconfig"
++
+ source "drivers/sensor/ens210/Kconfig"
+ 
+ source "drivers/sensor/fdc2x1x/Kconfig"
+diff --git a/drivers/sensor/ds18b20/CMakeLists.txt b/drivers/sensor/ds18b20/CMakeLists.txt
+new file mode 100644
+index 000000000000..d95181e74c1f
+--- /dev/null
++++ b/drivers/sensor/ds18b20/CMakeLists.txt
+@@ -0,0 +1,5 @@
++# SPDX-License-Identifier: Apache-2.0
++
++zephyr_library()
++
++zephyr_library_sources_ifdef(CONFIG_DS18B20 ds18b20.c)
+diff --git a/drivers/sensor/ds18b20/Kconfig b/drivers/sensor/ds18b20/Kconfig
+new file mode 100644
+index 000000000000..eb3db8514bab
+--- /dev/null
++++ b/drivers/sensor/ds18b20/Kconfig
+@@ -0,0 +1,10 @@
++# DS18B20 temperature and humidity sensor configuration options
++
++# Copyright (c) 2022 Thomas Stranger
++# SPDX-License-Identifier: Apache-2.0
++
++config DS18B20
++	bool "DS18B20 Temperature Sensor"
++	depends on W1_NET
++	help
++	  Enable driver for DS18B20 1-Wire temperature sensors.
+diff --git a/drivers/sensor/ds18b20/ds18b20.c b/drivers/sensor/ds18b20/ds18b20.c
+new file mode 100644
+index 000000000000..5ddcc8e0c62b
+--- /dev/null
++++ b/drivers/sensor/ds18b20/ds18b20.c
+@@ -0,0 +1,259 @@
++/*
++ * Copyright (c) 2018 Roman Tataurov <diytronic@yandex.ru>
++ * Copyright (c) 2022 Thomas Stranger
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++/**
++ * Driver for DS18B20 1-Wire temperature sensors
++ * A datasheet is available at:
++ * https://datasheets.maximintegrated.com/en/ds/DS18B20.pdf
++ */
++#define DT_DRV_COMPAT maxim_ds18b20
++
++#include <drivers/sensor.h>
++#include <drivers/sensor/w1_sensor.h>
++#include <kernel.h>
++#include <logging/log.h>
++#include <sys/__assert.h>
++
++#include "ds18b20.h"
++
++LOG_MODULE_REGISTER(DS18B20, CONFIG_SENSOR_LOG_LEVEL);
++
++static int ds18b20_configure(const struct device *dev);
++
++/* measure wait time for 9-bit, 10-bit, 11-bit, 12-bit resolution respectively */
++static const uint16_t measure_wait_ms[4] = { 94, 188, 376, 750 };
++
++static inline void ds18b20_temperature_from_raw(uint8_t *temp_raw,
++						struct sensor_value *val)
++{
++	uint16_t temp = sys_get_le16(temp_raw);
++
++	val->val1 = (temp & 0x0FFF) >> 4;
++	val->val2 = (temp & 0x000F) * 10000;
++}
++
++/*
++ * Write scratch pad, read back, then copy to eeprom
++ */
++static int ds18b20_write_scratchpad(const struct device *dev,
++				    struct ds18b20_scratchpad scratchpad)
++{
++	struct ds18b20_data *data = dev->data;
++	const struct device *bus = ds18b20_bus(dev);
++	uint8_t sp_data[4] = {
++		DS18B20_CMD_WRITE_SCRATCHPAD,
++		scratchpad.alarm_temp_high,
++		scratchpad.alarm_temp_low,
++		scratchpad.config
++	};
++
++	return w1_write_read(bus, &data->config, sp_data, sizeof(sp_data), NULL, 0);
++}
++
++static int ds18b20_read_scratchpad(const struct device *dev,
++				   struct ds18b20_scratchpad *scratchpad)
++{
++	struct ds18b20_data *data = dev->data;
++	const struct device *bus = ds18b20_bus(dev);
++	uint8_t cmd = DS18B20_CMD_READ_SCRATCHPAD;
++
++	return w1_write_read(bus, &data->config, &cmd, 1,
++			     (uint8_t *)&scratchpad[0], 9);
++}
++
++/* Starts sensor temperature conversion without waiting for completion. */
++static int ds18b20_temperature_convert(const struct device *dev)
++{
++	int ret;
++	struct ds18b20_data *data = dev->data;
++	const struct device *bus = ds18b20_bus(dev);
++
++	(void)w1_lock_bus(bus);
++	ret = w1_reset_select(bus, &data->config);
++	if (ret != 0) {
++		goto out;
++	}
++	ret = w1_write_byte(bus, DS18B20_CMD_CONVERT_T);
++out:
++	(void)w1_unlock_bus(bus);
++	return ret;
++}
++
++/* Read power supply status from the sensor. */
++static int ds18b20_read_power_supply(const struct device *dev)
++{
++	struct ds18b20_data *data = dev->data;
++	const struct device *bus = ds18b20_bus(dev);
++	int ret;
++	uint8_t cmd = DS18B20_CMD_READ_POWER_SUPPLY;
++
++	(void)w1_lock_bus(bus);
++	ret = w1_write_read(bus, &data->config, &cmd, 1, NULL, 0);
++	if (ret != 0) {
++		goto out;
++	}
++
++	ret = w1_read_bit(bus);
++	if (ret >= 0) {
++		data->power_supply = (bool)ret;
++	}
++out:
++	(void)w1_unlock_bus(bus);
++	return ret;
++}
++
++/*
++ * Write resolution into configuration struct,
++ * but don't write it to the sensor yet.
++ */
++static void ds18b20_set_resolution(const struct device *dev, uint8_t resolution)
++{
++	struct ds18b20_data *data = dev->data;
++
++	data->scratchpad.config &= ~DS18B20_RESOLUTION_MASK;
++	data->scratchpad.config |= DS18B20_RESOLUTION(resolution);
++}
++
++static int ds18b20_sample_fetch(const struct device *dev,
++				enum sensor_channel chan)
++{
++	const struct ds18b20_config *cfg = dev->config;
++	struct ds18b20_data *data = dev->data;
++	int status;
++
++	__ASSERT_NO_MSG(chan == SENSOR_CHAN_ALL ||
++			chan == SENSOR_CHAN_AMBIENT_TEMP);
++
++	if (!data->lazy_loaded) {
++		status = ds18b20_configure(dev);
++		if (status < 0) {
++			return status;
++		}
++		data->lazy_loaded = true;
++	}
++
++	status = ds18b20_temperature_convert(dev);
++	if (status < 0) {
++		LOG_DBG("W1 fetch error");
++		return status;
++	}
++	k_msleep(measure_wait_ms[DS18B20_RESOLUTION_INDEX(cfg->resolution)]);
++	return ds18b20_read_scratchpad(dev, &data->scratchpad);
++}
++
++static int ds18b20_channel_get(const struct device *dev,
++			       enum sensor_channel chan,
++			       struct sensor_value *val)
++{
++	struct ds18b20_data *data = dev->data;
++
++	if (chan != SENSOR_CHAN_AMBIENT_TEMP) {
++		return -ENOTSUP;
++	}
++
++	ds18b20_temperature_from_raw((uint8_t *)&data->scratchpad.temp, val);
++	return 0;
++}
++
++static int ds18b20_configure(const struct device *dev)
++{
++	const struct ds18b20_config *cfg = dev->config;
++	struct ds18b20_data *data = dev->data;
++
++	if (w1_reset_bus(cfg->bus) <= 0) {
++		LOG_ERR("No 1-Wire devices connected");
++		return -ENODEV;
++	}
++
++	/* In single drop configurations the rom can be read from device */
++	if (w1_get_peripheral_count(cfg->bus) == 1) {
++		if (w1_rom_to_uint64(&data->config.rom_id) == 0ULL) {
++			(void)w1_read_rom(cfg->bus, &data->config.rom_id);
++		}
++	} else if (w1_rom_to_uint64(&data->config.rom_id) == 0ULL) {
++		LOG_DBG("nr: %d", w1_get_peripheral_count(cfg->bus));
++		LOG_ERR("ROM required, because multiple devices are on the bus");
++		return -EINVAL;
++	}
++
++	if ((cfg->family != 0) && (cfg->family != data->config.rom_id.family)) {
++		LOG_ERR("Found 1-Wire device is not a DS18B20");
++		return -EINVAL;
++	}
++
++	ds18b20_read_power_supply(dev);
++	LOG_DBG("Using external power supply: %d", data->power_supply);
++
++	/* write defaults */
++	ds18b20_set_resolution(dev, cfg->resolution);
++	ds18b20_write_scratchpad(dev, data->scratchpad);
++	LOG_DBG("Init DS18B20: ROM=%016llx\n",
++		w1_rom_to_uint64(&data->config.rom_id));
++
++	return 0;
++}
++
++int ds18b20_attr_set(const struct device *dev, enum sensor_channel chan,
++		     enum sensor_attribute attr, const struct sensor_value *thr)
++{
++	struct ds18b20_data *data = dev->data;
++
++	if ((enum sensor_attribute_w1)attr != SENSOR_ATTR_W1_ROM_ID) {
++		return -ENOTSUP;
++	}
++
++	data->lazy_loaded = false;
++	w1_sensor_value_to_rom(thr, &data->config.rom_id);
++	return 0;
++}
++
++static const struct sensor_driver_api ds18b20_driver_api = {
++	.attr_set = ds18b20_attr_set,
++	.sample_fetch = ds18b20_sample_fetch,
++	.channel_get = ds18b20_channel_get,
++};
++
++static int ds18b20_init(const struct device *dev)
++{
++	const struct ds18b20_config *cfg = dev->config;
++	struct ds18b20_data *data = dev->data;
++
++	if (device_is_ready(cfg->bus) == 0) {
++		LOG_DBG("w1 bus is not ready");
++		return -ENODEV;
++	}
++
++	w1_uint64_to_rom(0ULL, &data->config.rom_id);
++	data->lazy_loaded = false;
++	/* in multi drop configurations the rom is need, but is not set during
++	 * driver initialization, therefore do lazy initialization in all cases.
++	 */
++
++	return 0;
++}
++
++#define DS18B20_CONFIG_INIT(inst)					\
++	{								\
++		.bus = DEVICE_DT_GET(DT_INST_BUS(inst)),		\
++		.family = (uint8_t)DT_INST_PROP(inst, family_code),	\
++		.resolution = DT_INST_PROP(inst, resolution),		\
++	}
++
++#define DS18B20_DEFINE(inst)						\
++	static struct ds18b20_data ds18b20_data_##inst;			\
++	static const struct ds18b20_config ds18b20_config_##inst =	\
++		DS18B20_CONFIG_INIT(inst);				\
++	DEVICE_DT_INST_DEFINE(inst,					\
++			      ds18b20_init,				\
++			      NULL,					\
++			      &ds18b20_data_##inst,			\
++			      &ds18b20_config_##inst,			\
++			      POST_KERNEL,				\
++			      CONFIG_SENSOR_INIT_PRIORITY,		\
++			      &ds18b20_driver_api);
++
++DT_INST_FOREACH_STATUS_OKAY(DS18B20_DEFINE)
+diff --git a/drivers/sensor/ds18b20/ds18b20.h b/drivers/sensor/ds18b20/ds18b20.h
+new file mode 100644
+index 000000000000..110787f11286
+--- /dev/null
++++ b/drivers/sensor/ds18b20/ds18b20.h
+@@ -0,0 +1,68 @@
++/*
++ * Copyright (c) 2022 Thomas Stranger
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_DRIVERS_SENSOR_DS18B20_DS18B20_H_
++#define ZEPHYR_DRIVERS_SENSOR_DS18B20_DS18B20_H_
++
++#include <device.h>
++#include <devicetree.h>
++#include <kernel.h>
++#include <drivers/gpio.h>
++#include <drivers/w1.h>
++#include <sys/util_macro.h>
++
++#define DS18B20_CMD_CONVERT_T         0x44
++#define DS18B20_CMD_WRITE_SCRATCHPAD  0x4E
++#define DS18B20_CMD_READ_SCRATCHPAD   0xBE
++#define DS18B20_CMD_COPY_SCRATCHPAD   0x48
++#define DS18B20_CMD_RECALL_EEPROM     0xB8
++#define DS18B20_CMD_READ_POWER_SUPPLY 0xB4
++
++/* Device is powered by an external source */
++#define DS18B20_POWER_SUPPLY_EXTERNAL 0x1
++/* Device is powered by "parasite" power from the w1-bus */
++#define DS18B20_POWER_SUPPLY_PARASITE 0x0
++
++/* resolution is set using bit 5 and 6 of configuration register
++ * macro only valid for values 9 to 12
++ */
++#define DS18B20_RESOLUTION_POS		5
++#define DS18B20_RESOLUTION_MASK		(BIT_MASK(2) << DS18B20_RESOLUTION_POS)
++/* convert resolution in bits to scratchpad config format */
++#define DS18B20_RESOLUTION(res)		((res - 9) << DS18B20_RESOLUTION_POS)
++/* convert resolution in bits to array index (for resolution specific elements) */
++#define DS18B20_RESOLUTION_INDEX(res)	(res - 9)
++
++struct ds18b20_scratchpad {
++	int16_t temp;
++	uint8_t alarm_temp_high;
++	uint8_t alarm_temp_low;
++	uint8_t config;
++	uint8_t res[3];
++	uint8_t crc;
++};
++
++struct ds18b20_config {
++	const struct device *bus;
++	uint8_t family;
++	uint8_t resolution;
++};
++
++struct ds18b20_data {
++	struct w1_config config;
++	struct ds18b20_scratchpad scratchpad;
++	bool power_supply;
++	bool lazy_loaded;
++};
++
++static inline const struct device *ds18b20_bus(const struct device *dev)
++{
++	const struct ds18b20_config *dcp = dev->config;
++
++	return dcp->bus;
++}
++
++#endif /* ZEPHYR_DRIVERS_SENSOR_DS18B20_DS18B20_H_ */
+diff --git a/dts/bindings/sensor/maxim,ds18b20.yaml b/dts/bindings/sensor/maxim,ds18b20.yaml
+new file mode 100644
+index 000000000000..9f6aaa6c5b50
+--- /dev/null
++++ b/dts/bindings/sensor/maxim,ds18b20.yaml
+@@ -0,0 +1,16 @@
++# Copyright (c) 2021, Thomas Stranger
++# SPDX-License-Identifier: Apache-2.0
++
++description: Maxim 1-Wire temperature sensor
++
++compatible: "maxim,ds18b20"
++
++include: w1-device.yaml
++
++properties:
++    resolution:
++      type: int
++      required: true
++      description: |
++          Resolution of the temperature reading in bit.
++          Valid configurations are from 9 to 12 bits.
+
+From 7adfd547eb08867bb536e0a4131762e3e6d2f171 Mon Sep 17 00:00:00 2001
+From: Thomas Stranger <thomas.stranger@outlook.com>
+Date: Thu, 8 Jul 2021 15:01:41 +0200
+Subject: [PATCH 08/11] samples: sensor: ds18b20: add sample for this
+ temperature driver
+
+This commit adds a sample for the maxim ds18b20 1-wire temperatue
+sensor in a single-drop bus configuration.
+Includes overlay files for nucleo_g0b1re und nrf52840dk_nrf52840 with
+the required open drain configuration.
+
+Signed-off-by: Thomas Stranger <thomas.stranger@outlook.com>
+---
+ samples/sensor/ds18b20/CMakeLists.txt         |  8 ++
+ samples/sensor/ds18b20/README.rst             | 80 +++++++++++++++++++
+ samples/sensor/ds18b20/arduino_serial.overlay | 30 +++++++
+ .../boards/nrf52840dk_nrf52840.overlay        | 29 +++++++
+ .../ds18b20/boards/nucleo_g0b1re.overlay      | 21 +++++
+ .../sensor/ds18b20/boards/serial_overlay.dtsi | 25 ++++++
+ samples/sensor/ds18b20/prj.conf               |  6 ++
+ samples/sensor/ds18b20/sample.yaml            | 27 +++++++
+ samples/sensor/ds18b20/src/main.c             | 54 +++++++++++++
+ 9 files changed, 280 insertions(+)
+ create mode 100644 samples/sensor/ds18b20/CMakeLists.txt
+ create mode 100644 samples/sensor/ds18b20/README.rst
+ create mode 100644 samples/sensor/ds18b20/arduino_serial.overlay
+ create mode 100644 samples/sensor/ds18b20/boards/nrf52840dk_nrf52840.overlay
+ create mode 100644 samples/sensor/ds18b20/boards/nucleo_g0b1re.overlay
+ create mode 100644 samples/sensor/ds18b20/boards/serial_overlay.dtsi
+ create mode 100644 samples/sensor/ds18b20/prj.conf
+ create mode 100644 samples/sensor/ds18b20/sample.yaml
+ create mode 100644 samples/sensor/ds18b20/src/main.c
+
+diff --git a/samples/sensor/ds18b20/CMakeLists.txt b/samples/sensor/ds18b20/CMakeLists.txt
+new file mode 100644
+index 000000000000..1c58a615b21c
+--- /dev/null
++++ b/samples/sensor/ds18b20/CMakeLists.txt
+@@ -0,0 +1,8 @@
++# SPDX-License-Identifier: Apache-2.0
++
++cmake_minimum_required(VERSION 3.13.1)
++find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
++project(ds18b20)
++
++FILE(GLOB app_sources src/*.c)
++target_sources(app PRIVATE ${app_sources})
+diff --git a/samples/sensor/ds18b20/README.rst b/samples/sensor/ds18b20/README.rst
+new file mode 100644
+index 000000000000..299c662599fd
+--- /dev/null
++++ b/samples/sensor/ds18b20/README.rst
+@@ -0,0 +1,80 @@
++.. _ds18b20_sample:
++
++DS18B20 1-Wire Temperature Sensor
++#################################
++
++Overview
++********
++
++This sample shows how to use the Zephyr :ref:`sensor_api` API driver for the
++`Maxim DS18B20`_ temperature sensor.
++
++.. _Maxim DS18B20:
++   https://www.maximintegrated.com/en/products/sensors/DS18B20.html`
++
++The sample periodically reads temperature data from the
++first available DS18B20 device discovered in the system. The sample checks the
++sensor in polling mode (without interrupt trigger).
++
++Building and Running
++********************
++
++The devicetree must have an enabled node with ``compatible = "maxim,ds18b20";``.
++See below for examples and common configurations.
++
++If the sensor is not built into your board, start by wiring the sensor pins
++as shown in the Figure Hardware Configuration of the `DS18B20 datasheet`_ at
++page 10.
++
++.. _DS18B20 datasheet:
++   https://datasheets.maximintegrated.com/en/ds/DS18B20.pdf
++
++Boards with a built-in DS18B20 or a board-specific overlay
++==========================================================
++
++Your board may have a DS18B20 node configured in its devicetree by default,
++or a board specific overlay file with an DS18B20 node is available.
++Make sure this node has ``status = "okay";``, then build and run with:
++
++.. zephyr-app-commands::
++   :zephyr-app: samples/sensor/ds18b20
++   :goals: build flash
++   :board: nucleo_g0b1re
++
++DS18B20 via Arduino Serial pins
++===============================
++
++Make sure that you have an external circuit to provide an open-drain interface
++for the 1-Wire bus.
++Once you have wired the sensor and the serial peripheral on the Arduino header
++to the 1-Wire bus, build and flash with:
++
++.. zephyr-app-commands::
++   :zephyr-app: samples/sensor/ds18b20
++   :goals: build flash
++   :gen-args: -DDTC_OVERLAY_FILE=arduino_serial.overlay
++
++The devicetree overlay :zephyr_file:`samples/sensor/ds18b20/arduino_serial.overlay`
++should work on any board with a properly configured Arduino pin-compatible Serial
++peripheral.
++
++Sample Output
++=============
++
++The sample prints output to the serial console. DS18B20 device driver messages
++are also logged. Refer to your board's documentation for information on
++connecting to its serial console.
++
++Here is example output for the default application settings, assuming that only
++one DS18B20 sensor is connected to the standard Arduino Serial pins:
++
++.. code-block:: none
++
++   *** Booting Zephyr OS build zephyr-v2.6.0-1929-gf7abe4a6689e  ***
++   Found device "DS18B20", getting sensor data
++   [00:00:00.000,039] <dbg> w1_serial: w1_serial_init: w1-serial initialized, with 1 devices
++   [00:00:00.015,140] <dbg> DS18B20: ds18b20_init: Using external power supply: 1
++   [00:00:00.021,213] <dbg> DS18B20: ds18b20_init: Init DS18B20: ROM=28b1bb3f070000b9
++
++   Temp: 25.040000
++   Temp: 25.030000
+diff --git a/samples/sensor/ds18b20/arduino_serial.overlay b/samples/sensor/ds18b20/arduino_serial.overlay
+new file mode 100644
+index 000000000000..8df55241f216
+--- /dev/null
++++ b/samples/sensor/ds18b20/arduino_serial.overlay
+@@ -0,0 +1,30 @@
++/*
++ * Copyright (c) 2022, Thomas Stranger
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++/*
++ * Example configuration of a DS18B20 device on an Arduino serial bus.
++ * Requires external circuit to provide an open-drain interface.
++ */
++
++&arduino_serial {
++	status = "okay";
++
++	w1_0: w1-zephyr-serial-0 {
++		compatible = "zephyr,w1-serial";
++		#address-cells = <1>;
++		#size-cells = <0>;
++		label = "W1_0";
++		status = "okay";
++
++		ds18b20 {
++			compatible = "maxim,ds18b20";
++			family-code = <0x28>;
++			resolution = <12>;
++			label = "DS18B20";
++			status = "okay";
++		};
++	};
++};
+diff --git a/samples/sensor/ds18b20/boards/nrf52840dk_nrf52840.overlay b/samples/sensor/ds18b20/boards/nrf52840dk_nrf52840.overlay
+new file mode 100644
+index 000000000000..358f7505591e
+--- /dev/null
++++ b/samples/sensor/ds18b20/boards/nrf52840dk_nrf52840.overlay
+@@ -0,0 +1,29 @@
++/*
++ * Copyright (c) 2022, Thomas Stranger
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++/*
++ * Example configuration of a DS18b20 device on an Arduino serial bus, using
++ * the zephyr-serial 1-Wire driver.
++ * Open drain configuration allows communication by simply connecting the bus
++ * line to the UART RX pin as well as the TX pin
++ * An external pull-up should be added anyways.
++ */
++
++#include "serial_overlay.dtsi"
++
++&pinctrl {
++	uart1_default: uart1_default {
++		group1 {
++			psels = <NRF_PSEL(UART_RX, 1, 1)>;
++			bias-pull-up;
++		};
++		group2 {
++			psels = <NRF_PSEL(UART_TX, 1, 2)>;
++			/* max. 5mA drive strength: */
++			drive-mode = <NRF_DRIVE_H0D1>;
++		};
++	};
++};
+diff --git a/samples/sensor/ds18b20/boards/nucleo_g0b1re.overlay b/samples/sensor/ds18b20/boards/nucleo_g0b1re.overlay
+new file mode 100644
+index 000000000000..1dfdf1858abf
+--- /dev/null
++++ b/samples/sensor/ds18b20/boards/nucleo_g0b1re.overlay
+@@ -0,0 +1,21 @@
++/*
++ * Copyright (c) 2022, Thomas Stranger
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++/*
++ * Example configuration of a DS18B20 device on an Arduino serial bus.
++ * Open drain configuration allows communication by simply connecting the bus
++ * line to:
++ * a) the UART RX pin as well as the TX pin.
++ * b) the UART TX pin only, while the single wire half-duplex mode is enabled.
++ * An external pull-up should be added anyways.
++ */
++
++#include "serial_overlay.dtsi"
++
++&usart1_tx_pc4 {
++	drive-open-drain;
++	bias-pull-up;
++};
+diff --git a/samples/sensor/ds18b20/boards/serial_overlay.dtsi b/samples/sensor/ds18b20/boards/serial_overlay.dtsi
+new file mode 100644
+index 000000000000..a68893e7169f
+--- /dev/null
++++ b/samples/sensor/ds18b20/boards/serial_overlay.dtsi
+@@ -0,0 +1,25 @@
++/*
++ * Copyright (c) 2022 Thomas Stranger
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++&arduino_serial {
++	status = "okay";
++
++	w1_0: w1-zephyr-serial-0 {
++		compatible = "zephyr,w1-serial";
++		#address-cells = <1>;
++		#size-cells = <0>;
++		label = "W1_0";
++		status = "okay";
++
++		ds18b20 {
++			compatible = "maxim,ds18b20";
++			family-code = <0x28>;
++			resolution = <12>;
++			label = "DS18B20";
++			status = "okay";
++		};
++	};
++};
+diff --git a/samples/sensor/ds18b20/prj.conf b/samples/sensor/ds18b20/prj.conf
+new file mode 100644
+index 000000000000..a70020207f35
+--- /dev/null
++++ b/samples/sensor/ds18b20/prj.conf
+@@ -0,0 +1,6 @@
++CONFIG_SENSOR=y
++CONFIG_W1=y
++CONFIG_DS18B20=y
++
++CONFIG_LOG=y
++CONFIG_SENSOR_LOG_LEVEL_DBG=y
+diff --git a/samples/sensor/ds18b20/sample.yaml b/samples/sensor/ds18b20/sample.yaml
+new file mode 100644
+index 000000000000..adb2fc7a8f88
+--- /dev/null
++++ b/samples/sensor/ds18b20/sample.yaml
+@@ -0,0 +1,27 @@
++sample:
++  name: DS18B20 Temperature Sensor sample
++common:
++    harness: console
++    tags: sensors
++tests:
++  sample.sensor.ds18b20.w1_serial:
++    platform_allow: nucleo_g0b1re nrf52840dk_nrf52840
++    integration_platforms:
++      - nucleo_g0b1re
++      - nrf52840dk_nrf52840
++    harness_config:
++        type: one_line
++        regex:
++            - "Temp: (.*)"
++        fixture: fixture_w1_serial_ds18b20
++  sample.sensor.ds18b20.w1_arduino_serial:
++    platform_allow: nucleo_g071rb
++    depends_on: arduino_serial
++    integration_platforms:
++      - nucleo_g071rb
++    extra_args: "DTC_OVERLAY_FILE=arduino_serial.overlay"
++    harness_config:
++        type: one_line
++        regex:
++            - "Temp: (.*)"
++        fixture: fixture_w1_arduino_serial_ds18b20
+diff --git a/samples/sensor/ds18b20/src/main.c b/samples/sensor/ds18b20/src/main.c
+new file mode 100644
+index 000000000000..5264926b1359
+--- /dev/null
++++ b/samples/sensor/ds18b20/src/main.c
+@@ -0,0 +1,54 @@
++/*
++ * Copyright (c) 2022 Thomas Stranger
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <zephyr.h>
++#include <device.h>
++#include <devicetree.h>
++#include <drivers/sensor.h>
++
++/*
++ * Get a device structure from a devicetree node with compatible
++ * "maxim,ds18b20". (If there are multiple, just pick one.)
++ */
++static const struct device *get_ds18b20_device(void)
++{
++	const struct device *dev = DEVICE_DT_GET_ANY(maxim_ds18b20);
++
++	if (dev == NULL) {
++		/* No such node, or the node does not have status "okay". */
++		printk("\nError: no device found.\n");
++		return NULL;
++	}
++
++	if (!device_is_ready(dev)) {
++		printk("\nError: Device \"%s\" is not ready; "
++		       "check the driver initialization logs for errors.\n",
++		       dev->name);
++		return NULL;
++	}
++
++	printk("Found device \"%s\", getting sensor data\n", dev->name);
++	return dev;
++}
++
++void main(void)
++{
++	const struct device *dev = get_ds18b20_device();
++
++	if (dev == NULL) {
++		return;
++	}
++
++	while (1) {
++		struct sensor_value temp;
++
++		sensor_sample_fetch(dev);
++		sensor_channel_get(dev, SENSOR_CHAN_AMBIENT_TEMP, &temp);
++
++		printk("Temp: %d.%06d\n", temp.val1, temp.val2);
++		k_sleep(K_MSEC(5000));
++	}
++}
+
+From 220e25e77f85076b62c480d842e7ecd2a4c708c4 Mon Sep 17 00:00:00 2001
+From: Thomas Stranger <thomas.stranger@outlook.com>
+Date: Sun, 18 Jul 2021 19:14:13 +0200
+Subject: [PATCH 09/11] doc: add api documentation for w1 driver
+
+This commit adds the w1 driver API documentation.
+
+Signed-off-by: Thomas Stranger <thomas.stranger@outlook.com>
+---
+ .../1-Wire_bus_topology.drawio.svg            |  4 +
+ doc/reference/peripherals/index.rst           |  1 +
+ doc/reference/peripherals/w1.rst              | 94 +++++++++++++++++++
+ 3 files changed, 99 insertions(+)
+ create mode 100644 doc/reference/peripherals/1-Wire_bus_topology.drawio.svg
+ create mode 100644 doc/reference/peripherals/w1.rst
+
+diff --git a/doc/reference/peripherals/1-Wire_bus_topology.drawio.svg b/doc/reference/peripherals/1-Wire_bus_topology.drawio.svg
+new file mode 100644
+index 000000000000..824771cba8ab
+--- /dev/null
++++ b/doc/reference/peripherals/1-Wire_bus_topology.drawio.svg
+@@ -0,0 +1,4 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<!-- Do not edit this file with editors other than diagrams.net -->
++<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
++<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" width="522px" height="172px" viewBox="-0.5 -0.5 522 172" content="&lt;mxfile host=&quot;Electron&quot; modified=&quot;2021-11-16T10:11:43.166Z&quot; agent=&quot;5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/15.7.3 Chrome/91.0.4472.164 Electron/13.6.1 Safari/537.36&quot; etag=&quot;lUOizgd_bRq8tH8OEN3N&quot; version=&quot;15.7.3&quot; type=&quot;device&quot;&gt;&lt;diagram id=&quot;XINd0_pX9GN2xeXJIteg&quot; name=&quot;Page-1&quot;&gt;5Vtbc6o6FP41PtYhF0QeW227X/aZPdOZ03MeqaSY2QgewNv+9SdAEJKgIoKg2pmWLMJK+L51yYrpAE0W2/fAWs5/+jZxB1CztwM0HUBojDT2OxbsuEAzUoETUDsVgVzwQf8QLuTPOStqk1DoGPm+G9GlKJz5nkdmkSCzgsDfiN2+fVccdWk5RBF8zCxXlX5SO5qn0rGu5fIfhDrzbGSg8TsLK+vMBeHcsv1NQYReB2gS+H6UXi22E+LG2GW4pM+9Hbi7n1hAvKjKA+/I+3Ksz+jNCDUHveL1n83z0yjVsrbcFX9hPtlolyHgBP5qybuRICLbMtytr6y7ps4L7N+WWQnxFyQKdqwLVwTH/JFNAV8umhegzWQWZ9TZa8pfml3w9z4DAwxOg8Aw8GwSa9EG6GUzpxH5WFqz+O6G2T2TzaMFG3UK2OW370XckgGM29R1J77rB4ku9JZ8mPwgqEXwDtOmItoVgroCIHj6pAEZwJHLxn75CgQ0R/+tYqNPcHoKE6CeWQeAl9v8Jrty4r8frrUm8V2FE4ZaJAIfRoH/m2RQe75HJPS5yHKp47HmjKFMmPwl5oAyp3/mNxbUtuNhSpkWbaFINm6D1EwLJ28nNguUj0ooR605jdZnpzkeccYilEa1+LOP7I1jCVt0n59WGJv4HfnOcW5NkduS3HJVNzGq5tczwLg85aKuU+74NCwnwoUVLtPl3jfdxvZ0Qdw1+pVMzSskUxXuGw4I55Daz2QKKiTTtpfhOuw4JoAKy/DrBQWglaPVGTptLhKysODdfVg4RGtP4wI+7RLEs5/jfY4c+QJZIozps8RWdjxOxogCAHoJAJksIK4V0bWovgwVPsIvn7KBc/RHEvwysKG/CmaEP1Xc6pAUYQMcVxRZgUMiRRED0toVui3jDqFC4x6YC5hVS+ZLmCVbGv3D78TX/8byoaHz5nRb6Dfd3ao56LXNAR9XdMAcGiO7wi5bDbK1IdQLfINGyGaTSlA9mai7sgqEJauANa1ClxVVDBKNWYVaG2YZvfdJGDZTrAM530JdSbhlpgRaS7hqYfr3ZPI4hLDKcKgLlJRUBVhXGZGdsDlG1HL4WOycuVYY0tmx8FmELQmTHptnGk/1rJnE06FmokyQB9WktSu2fpGAspeN6UyEIQsckRTMmwy/KO2YhqeTxtxVnIZQNCSAa8ZpKC0Drp280WkDPGujuwk3hSIkJTvYoITZ1pw0U9zQAqd1D63ujaedDPXKyepWTLIiDIeGqeUfeFWfg+pWEB4avx8oDyPRwU3VwdFVHVzdfbrEwVutYLryRV03h2OBNXkzsHJlcqrwbdv9KqS8R2cbaVojXMt6rl2Fwma3GO+Ta2AODc3MP80wz7SaRa1Gt07fzo7kXRkCbsjpZT1Xd/ob2pDsjOtWnB73zOkrnE9haugyPLQUPvbtq/y1nXSkC03jn4YWzKa49AKQt4v7Vqqt4MNWcdl6ucqu1S3gioCEK+4U1yxO3j6u/bJXVOHsxU3gintmr1UqqVvAFWY1YU/s9bEORuDxSES/7jaf8p0nZMsRKOrq/GwEanZ12n9yxaVl7WMOyrYRNodjqKxg+8NzhcXnbBWsEyaTYqLeVwg4ffSNxtO7DZMYyWWBWc8k8Fj290sPQlUcR9eOz0t+Qb5gzi0snUGz9lbh1PmD2ptM36hueWvKywRpLk3ZmzyODs7zAyTYZ0v2phaB739NFZO72y+xlNM9uLXTPayZ/yNtyl/+38jo9X8=&lt;/diagram&gt;&lt;/mxfile&gt;" style="background-color: rgb(255, 255, 255);"><defs/><g><rect x="200" y="0" width="80" height="80" fill="#ffffff" stroke="rgba(0, 0, 0, 1)" pointer-events="none"/><g transform="translate(-0.5 -0.5)"><switch><foreignObject pointer-events="none" width="100%" height="100%" requiredFeatures="http://www.w3.org/TR/SVG11/feature#Extensibility" style="overflow: visible; text-align: left;"><div xmlns="http://www.w3.org/1999/xhtml" style="display: flex; align-items: unsafe center; justify-content: unsafe center; width: 58px; height: 1px; padding-top: 25px; margin-left: 211px;"><div data-drawio-colors="color: rgba(0, 0, 0, 1); " style="box-sizing: border-box; font-size: 0px; text-align: center;"><div style="display: inline-block; font-size: 14px; font-family: Helvetica; color: rgb(0, 0, 0); line-height: 1.2; pointer-events: none; white-space: normal; overflow-wrap: normal;">1-Wire<br style="font-size: 14px" />Slave 1</div></div></div></foreignObject><text x="240" y="29" fill="rgba(0, 0, 0, 1)" font-family="Helvetica" font-size="14px" text-anchor="middle">1-Wire...</text></switch></g><rect x="0" y="70" width="80" height="100" fill="#ffffff" stroke="rgba(0, 0, 0, 1)" pointer-events="none"/><g transform="translate(-0.5 -0.5)"><switch><foreignObject pointer-events="none" width="100%" height="100%" requiredFeatures="http://www.w3.org/TR/SVG11/feature#Extensibility" style="overflow: visible; text-align: left;"><div xmlns="http://www.w3.org/1999/xhtml" style="display: flex; align-items: unsafe center; justify-content: unsafe center; width: 58px; height: 1px; padding-top: 95px; margin-left: 11px;"><div data-drawio-colors="color: rgba(0, 0, 0, 1); " style="box-sizing: border-box; font-size: 0px; text-align: center;"><div style="display: inline-block; font-size: 14px; font-family: Helvetica; color: rgb(0, 0, 0); line-height: 1.2; pointer-events: none; white-space: normal; overflow-wrap: normal;">1-Wire<br style="font-size: 14px" />Master</div></div></div></foreignObject><text x="40" y="99" fill="rgba(0, 0, 0, 1)" font-family="Helvetica" font-size="14px" text-anchor="middle">1-Wire...</text></switch></g><rect x="300" y="0" width="80" height="80" fill="rgba(255, 255, 255, 1)" stroke="rgba(0, 0, 0, 1)" pointer-events="none"/><g transform="translate(-0.5 -0.5)"><switch><foreignObject pointer-events="none" width="100%" height="100%" requiredFeatures="http://www.w3.org/TR/SVG11/feature#Extensibility" style="overflow: visible; text-align: left;"><div xmlns="http://www.w3.org/1999/xhtml" style="display: flex; align-items: unsafe center; justify-content: unsafe center; width: 58px; height: 1px; padding-top: 25px; margin-left: 311px;"><div data-drawio-colors="color: rgba(0, 0, 0, 1); " style="box-sizing: border-box; font-size: 0px; text-align: center;"><div style="display: inline-block; font-size: 14px; font-family: Helvetica; color: rgb(0, 0, 0); line-height: 1.2; pointer-events: none; white-space: normal; overflow-wrap: normal;">1-Wire<br style="font-size: 14px" />Slave 2</div></div></div></foreignObject><text x="340" y="29" fill="rgba(0, 0, 0, 1)" font-family="Helvetica" font-size="14px" text-anchor="middle">1-Wire...</text></switch></g><rect x="440" y="0" width="80" height="80" fill="rgba(255, 255, 255, 1)" stroke="rgba(0, 0, 0, 1)" pointer-events="none"/><g transform="translate(-0.5 -0.5)"><switch><foreignObject pointer-events="none" width="100%" height="100%" requiredFeatures="http://www.w3.org/TR/SVG11/feature#Extensibility" style="overflow: visible; text-align: left;"><div xmlns="http://www.w3.org/1999/xhtml" style="display: flex; align-items: unsafe center; justify-content: unsafe center; width: 58px; height: 1px; padding-top: 25px; margin-left: 451px;"><div data-drawio-colors="color: rgba(0, 0, 0, 1); " style="box-sizing: border-box; font-size: 0px; text-align: center;"><div style="display: inline-block; font-size: 14px; font-family: Helvetica; color: rgb(0, 0, 0); line-height: 1.2; pointer-events: none; white-space: normal; overflow-wrap: normal;">1-Wire<br style="font-size: 14px" />Slave n</div></div></div></foreignObject><text x="480" y="29" fill="rgba(0, 0, 0, 1)" font-family="Helvetica" font-size="14px" text-anchor="middle">1-Wire...</text></switch></g><path d="M 80 130 L 391 130" fill="none" stroke="rgba(0, 0, 0, 1)" stroke-miterlimit="10" pointer-events="none"/><path d="M 80 150 L 394 150" fill="none" stroke="rgba(0, 0, 0, 1)" stroke-miterlimit="10" pointer-events="none"/><path d="M 460 80 L 460 130" fill="none" stroke="rgba(0, 0, 0, 1)" stroke-miterlimit="10" pointer-events="none"/><g transform="translate(-0.5 -0.5)"><switch><foreignObject pointer-events="none" width="100%" height="100%" requiredFeatures="http://www.w3.org/TR/SVG11/feature#Extensibility" style="overflow: visible; text-align: left;"><div xmlns="http://www.w3.org/1999/xhtml" style="display: flex; align-items: unsafe center; justify-content: unsafe center; width: 48px; height: 1px; padding-top: 130px; margin-left: 31px;"><div data-drawio-colors="color: rgba(0, 0, 0, 1); " style="box-sizing: border-box; font-size: 0px; text-align: center;"><div style="display: inline-block; font-size: 12px; font-family: Helvetica; color: rgb(0, 0, 0); line-height: 1.2; pointer-events: none; white-space: normal; overflow-wrap: normal;">1-Wire</div></div></div></foreignObject><text x="55" y="134" fill="rgba(0, 0, 0, 1)" font-family="Helvetica" font-size="12px" text-anchor="middle">1-Wire</text></switch></g><g transform="translate(-0.5 -0.5)"><switch><foreignObject pointer-events="none" width="100%" height="100%" requiredFeatures="http://www.w3.org/TR/SVG11/feature#Extensibility" style="overflow: visible; text-align: left;"><div xmlns="http://www.w3.org/1999/xhtml" style="display: flex; align-items: unsafe center; justify-content: unsafe center; width: 43px; height: 1px; padding-top: 30px; margin-left: 124px;"><div data-drawio-colors="color: rgba(0, 0, 0, 1); " style="box-sizing: border-box; font-size: 0px; text-align: center;"><div style="display: inline-block; font-size: 12px; font-family: Helvetica; color: rgb(0, 0, 0); line-height: 1.2; pointer-events: none; white-space: normal; overflow-wrap: normal;">VCC</div></div></div></foreignObject><text x="145" y="34" fill="rgba(0, 0, 0, 1)" font-family="Helvetica" font-size="12px" text-anchor="middle">VCC</text></switch></g><path d="M 145 70 L 145 48.23" fill="none" stroke="rgba(0, 0, 0, 1)" stroke-miterlimit="10" pointer-events="none"/><path d="M 145 42.98 L 148.5 49.98 L 145 48.23 L 141.5 49.98 Z" fill="rgba(0, 0, 0, 1)" stroke="rgba(0, 0, 0, 1)" stroke-miterlimit="10" pointer-events="none"/><rect x="140" y="70" width="10" height="20" fill="rgba(255, 255, 255, 1)" stroke="rgba(0, 0, 0, 1)" pointer-events="none"/><path d="M 145 130 L 145 91.86" fill="none" stroke="rgba(0, 0, 0, 1)" stroke-miterlimit="10" pointer-events="none"/><g transform="translate(-0.5 -0.5)"><switch><foreignObject pointer-events="none" width="100%" height="100%" requiredFeatures="http://www.w3.org/TR/SVG11/feature#Extensibility" style="overflow: visible; text-align: left;"><div xmlns="http://www.w3.org/1999/xhtml" style="display: flex; align-items: unsafe center; justify-content: unsafe center; width: 28px; height: 1px; padding-top: 100px; margin-left: 151px;"><div data-drawio-colors="color: rgba(0, 0, 0, 1); " style="box-sizing: border-box; font-size: 0px; text-align: center;"><div style="display: inline-block; font-size: 12px; font-family: Helvetica; color: rgb(0, 0, 0); line-height: 1.2; pointer-events: none; white-space: normal; overflow-wrap: normal;">4.7k</div></div></div></foreignObject><text x="165" y="104" fill="rgba(0, 0, 0, 1)" font-family="Helvetica" font-size="12px" text-anchor="middle">4.7k</text></switch></g><path d="M 479.8 80 L 480 150" fill="none" stroke="rgba(0, 0, 0, 1)" stroke-miterlimit="10" pointer-events="none"/><path d="M 220 80 L 220 130" fill="none" stroke="rgba(0, 0, 0, 1)" stroke-miterlimit="10" pointer-events="none"/><path d="M 239.71 80 L 239.91 150" fill="none" stroke="rgba(0, 0, 0, 1)" stroke-miterlimit="10" pointer-events="none"/><path d="M 320 80 L 320 130" fill="none" stroke="rgba(0, 0, 0, 1)" stroke-miterlimit="10" pointer-events="none"/><path d="M 339.71 80 L 339.91 150" fill="none" stroke="rgba(0, 0, 0, 1)" stroke-miterlimit="10" pointer-events="none"/><ellipse cx="220" cy="130" rx="2" ry="2" fill="#3d3d3d" stroke="rgba(0, 0, 0, 1)" pointer-events="none"/><ellipse cx="240" cy="150" rx="2" ry="2" fill="#3d3d3d" stroke="rgba(0, 0, 0, 1)" pointer-events="none"/><ellipse cx="320" cy="130" rx="2" ry="2" fill="#3d3d3d" stroke="rgba(0, 0, 0, 1)" pointer-events="none"/><ellipse cx="340" cy="150" rx="2" ry="2" fill="#3d3d3d" stroke="rgba(0, 0, 0, 1)" pointer-events="none"/><ellipse cx="145" cy="130" rx="2" ry="2" fill="#3d3d3d" stroke="rgba(0, 0, 0, 1)" pointer-events="none"/><path d="M 406 130 L 460 129.92" fill="none" stroke="rgba(0, 0, 0, 1)" stroke-miterlimit="10" pointer-events="none"/><path d="M 409 150 L 480 149.83" fill="none" stroke="rgba(0, 0, 0, 1)" stroke-miterlimit="10" pointer-events="none"/><path d="M 387 159 Q 400 150 393.5 139.5 Q 387 129 400 120" fill="none" stroke="rgba(0, 0, 0, 1)" stroke-miterlimit="10" pointer-events="none"/><path d="M 400 160 Q 413 151 406.5 140.5 Q 400 130 413 121" fill="none" stroke="rgba(0, 0, 0, 1)" stroke-miterlimit="10" pointer-events="none"/><g transform="translate(-0.5 -0.5)"><switch><foreignObject pointer-events="none" width="100%" height="100%" requiredFeatures="http://www.w3.org/TR/SVG11/feature#Extensibility" style="overflow: visible; text-align: left;"><div xmlns="http://www.w3.org/1999/xhtml" style="display: flex; align-items: unsafe center; justify-content: unsafe center; width: 48px; height: 1px; padding-top: 150px; margin-left: 31px;"><div data-drawio-colors="color: rgba(0, 0, 0, 1); " style="box-sizing: border-box; font-size: 0px; text-align: center;"><div style="display: inline-block; font-size: 12px; font-family: Helvetica; color: rgb(0, 0, 0); line-height: 1.2; pointer-events: none; white-space: normal; overflow-wrap: normal;">GND</div></div></div></foreignObject><text x="55" y="154" fill="rgba(0, 0, 0, 1)" font-family="Helvetica" font-size="12px" text-anchor="middle">GND</text></switch></g></g><switch><g requiredFeatures="http://www.w3.org/TR/SVG11/feature#Extensibility"/><a transform="translate(0,-5)" xlink:href="https://www.diagrams.net/doc/faq/svg-export-text-problems" target="_blank"><text text-anchor="middle" font-size="10px" x="50%" y="100%">Viewer does not support full SVG 1.1</text></a></switch></svg>
+\ No newline at end of file
+diff --git a/doc/reference/peripherals/index.rst b/doc/reference/peripherals/index.rst
+index 0016361775bb..91a1408e9208 100644
+--- a/doc/reference/peripherals/index.rst
++++ b/doc/reference/peripherals/index.rst
+@@ -38,3 +38,4 @@ Peripherals
+    watchdog.rst
+    video.rst
+    espi.rst
++   w1.rst
+diff --git a/doc/reference/peripherals/w1.rst b/doc/reference/peripherals/w1.rst
+new file mode 100644
+index 000000000000..3f6cfceb442f
+--- /dev/null
++++ b/doc/reference/peripherals/w1.rst
+@@ -0,0 +1,94 @@
++.. _w1_api:
++
++W1: Dallas 1-Wire Interface
++###########################
++
++Overview
++********
++
++1-Wire is a low speed half-duplex serial bus using only a single wire plus
++ground for both data transmission and device power supply.
++Similarly to I2C, 1-Wire uses a bidirectional open-collector data line,
++and is a single master multidrop bus. This means one controller (master)
++initiates all data exchanges with the target devices.
++1-Wire supports longer bus lines than I2C, while it reaches speeds of 16 kbps in
++standard speed mode and 142 kbps in overdrive mode.
++The implementation details are specified in the `BOOK OF IBUTTON STANDARDS`_.
++
++.. figure:: 1-Wire_bus_topology.drawio.svg
++   :align: center
++   :alt: 1-Wire bus topology
++
++   A typical 1-Wire bus topology
++
++
++.. _w1-master-api:
++
++W1 Master API
++==============
++
++Zephyr's 1-wire master API is used to interact with 1-Wire devices like
++temperature sensors and serial memories.
++
++In Zephyr this API is split into the following layers.
++
++* The link layer handles basic communication functions such as bus reset,
++  presence detect and bit transfer operations.
++  It is the only hardware-dependent layer in Zephyr.
++  This layer is supported by a driver using the zephyr-serial interface, which
++  should work on most zephyr platforms. In the future, a GPIO/Timer based driver
++  and hardware specific drivers might be added.
++* The 1-Wire network layer handles all means for device identification and bus
++  arbitration.
++  This includes ROM commands like match_rom, or search_rom.
++
++   * All slave devices have a unique 64-bit identification number, which
++     includes a 8-bit `1-Wire Family Code`_ and a 8-bit CRC.
++   * In order to find devices on the bus, the standard specifies an search
++     algorithm which successively detects all devices on the bus.
++     This algorithm is described in detail by `Maxim's Applicationnote 187`_.
++
++* Transport layer and Presentation layer functions are not implemented in the
++  generic 1-Wire driver and therefore must be handled in individual device drivers.
++
++The 1-Wire API is considered experimental.
++
++
++Configuration Options
++*********************
++
++Related configuration options:
++
++* :kconfig:option:`CONFIG_W1`
++* :kconfig:option:`CONFIG_W1_NET`
++
++
++API Reference
++*************
++
++1-Wire data link layer
++======================
++
++.. doxygengroup:: w1_data_link
++
++1-Wire network layer
++====================
++
++.. doxygengroup:: w1_network
++
++1-Wire generic functions and helpers
++====================================
++
++Functions that are not directly related to any of the networking layers.
++
++.. doxygengroup:: w1_interface
++
++
++.. _BOOK OF IBUTTON STANDARDS:
++   https://www.maximintegrated.com/en/design/technical-documents/app-notes/9/937.html
++
++.. _1-Wire Family Code:
++   https://www.maximintegrated.com/en/design/technical-documents/app-notes/1/155.html
++
++.. _Maxim's Applicationnote 187:
++   https://www.maximintegrated.com/en/design/technical-documents/app-notes/1/187.html
+
+From ac5174aadff0daa750b151bfa1bb49ac18c91fc3 Mon Sep 17 00:00:00 2001
+From: Thomas Stranger <thomas.stranger@outlook.com>
+Date: Thu, 8 Jul 2021 15:28:20 +0200
+Subject: [PATCH 10/11] tests: drivers: build_all: sensor: add w1 driver and
+ ds18b20
+
+This commit adds the necessary changes to build w1-devices using
+the vnd,w1 dummy driver in the build_all test case.
+
+Additionally, definitions for the ds18b20 1-wire temperature sensor
+are added.
+
+Signed-off-by: Thomas Stranger <thomas.stranger@outlook.com>
+---
+ tests/drivers/build_all/sensor/app.overlay | 11 +++++++++++
+ tests/drivers/build_all/sensor/prj.conf    |  2 ++
+ tests/drivers/build_all/sensor/w1.dtsi     | 15 +++++++++++++++
+ 3 files changed, 28 insertions(+)
+ create mode 100644 tests/drivers/build_all/sensor/w1.dtsi
+
+diff --git a/tests/drivers/build_all/sensor/app.overlay b/tests/drivers/build_all/sensor/app.overlay
+index 28e1dc3e07f1..aefb4e85355d 100644
+--- a/tests/drivers/build_all/sensor/app.overlay
++++ b/tests/drivers/build_all/sensor/app.overlay
+@@ -126,6 +126,17 @@
+ 			#include "uart.dtsi"
+ 		};
+ 
++		test_w1: w1@66660000 {
++			compatible = "vnd,w1";
++			reg = <0x66660000 0x1000>;
++			#address-cells = <1>;
++			#size-cells = <0>;
++			label = "TEST_W1_MASTER";
++			status = "okay";
++
++			#include "w1.dtsi"
++		};
++
+ 		dht22 {
+ 			compatible = "aosong,dht";
+ 			status = "okay";
+diff --git a/tests/drivers/build_all/sensor/prj.conf b/tests/drivers/build_all/sensor/prj.conf
+index 120db1876a68..12266b5f3550 100644
+--- a/tests/drivers/build_all/sensor/prj.conf
++++ b/tests/drivers/build_all/sensor/prj.conf
+@@ -8,6 +8,7 @@ CONFIG_I2C=y
+ CONFIG_SERIAL=y
+ CONFIG_SPI=y
+ CONFIG_SENSOR=y
++CONFIG_W1=y
+ CONFIG_ADT7420=y
+ CONFIG_ADXL345=y
+ CONFIG_ADXL362=y
+@@ -29,6 +30,7 @@ CONFIG_BQ274XX=y
+ CONFIG_CCS811=y
+ CONFIG_DHT=y
+ CONFIG_DPS310=y
++CONFIG_DS18B20=y
+ CONFIG_ENS210=y
+ CONFIG_FDC2X1X=y
+ CONFIG_FXAS21002=y
+diff --git a/tests/drivers/build_all/sensor/w1.dtsi b/tests/drivers/build_all/sensor/w1.dtsi
+new file mode 100644
+index 000000000000..eaf84c4b383e
+--- /dev/null
++++ b/tests/drivers/build_all/sensor/w1.dtsi
+@@ -0,0 +1,15 @@
++/*
++ * Copyright (c) 2022, Thomas Stranger
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ *
++ * Application overlay for w1 devices
++ */
++
++test-w1-ds18b20 {
++	compatible = "maxim,ds18b20";
++	family-code = <0x28>;
++	resolution = <12>;
++	label = "DS18B20";
++	status = "okay";
++};
+
+From cf83f2a04c360feea1ab88d0fe20c954410be477 Mon Sep 17 00:00:00 2001
+From: Thomas Stranger <thomas.stranger@outlook.com>
+Date: Thu, 8 Jul 2021 14:15:29 +0200
+Subject: [PATCH 11/11] CODEOWNERS: MAINTAINERS: Add entry for w1 support
+
+Add entries for w1 api, drivers, and tests in the CODEOWNERS as well
+as the MAINTAINERS file.
+
+Signed-off-by: Thomas Stranger <thomas.stranger@outlook.com>
+---
+ CODEOWNERS      |  3 +++
+ MAINTAINERS.yml | 13 +++++++++++++
+ 2 files changed, 16 insertions(+)
+
+diff --git a/CODEOWNERS b/CODEOWNERS
+index db1ea8653daf..6f3b09b0d1cc 100644
+--- a/CODEOWNERS
++++ b/CODEOWNERS
+@@ -420,6 +420,7 @@
+ /drivers/i2c/i2c_dw*                      @dcpleung
+ /drivers/i2c/*tca954x*                    @kurddt
+ /drivers/*/*xec*                          @franciscomunoz @albertofloyd @sjvasanth1
++/drivers/w1/                              @str4t0m
+ /drivers/watchdog/*gecko*                 @oanerer
+ /drivers/watchdog/*sifive*                @katsuster
+ /drivers/watchdog/wdt_handlers.c          @dcpleung @nashif
+@@ -541,6 +542,7 @@
+ /include/drivers/peci.h                   @albertofloyd @franciscomunoz @sjvasanth1
+ /include/drivers/pm_cpu_ops.h             @carlocaione
+ /include/drivers/pm_cpu_ops/              @carlocaione
++/include/drivers/w1.h                     @str4t0m
+ /include/app_memory/                      @dcpleung
+ /include/arch/arc/                        @abrodkin @ruuddw @evgeniy-paltsev
+ /include/arch/arc/arch.h                  @abrodkin @ruuddw @evgeniy-paltsev
+@@ -781,6 +783,7 @@ scripts/gen_image_info.py                 @tejlmand
+ /tests/drivers/hwinfo/                    @alexanderwachter
+ /tests/drivers/spi/                       @tbursztyka
+ /tests/drivers/uart/uart_async_api/       @Mierunski
++/tests/drivers/w1/                        @str4t0m
+ /tests/kernel/                            @dcpleung @andyross @nashif
+ /tests/lib/                               @nashif
+ /tests/lib/cmsis_dsp/                     @stephanosio
+diff --git a/MAINTAINERS.yml b/MAINTAINERS.yml
+index 0642df9391f0..9461d8db1437 100644
+--- a/MAINTAINERS.yml
++++ b/MAINTAINERS.yml
+@@ -950,6 +950,19 @@ Documentation:
+     labels:
+         - "area: Video"
+ 
++"Drivers: W1":
++    status: maintained
++    maintainers:
++        - str4t0m
++    collaborators:
++        - dp7hgh7
++    files:
++        - drivers/w1/
++        - include/drivers/w1.h
++        - tests/drivers/w1/
++    labels:
++        - "area: W1"
++
+ "Drivers: Watchdog":
+     status: orphaned
+     collaborators:

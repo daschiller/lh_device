@@ -1,0 +1,32 @@
+From 8b19ec3ba79bd4a0e736875ccf40431a67f28a54 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Andrzej=20G=C5=82=C4=85bek?= <andrzej.glabek@nordicsemi.no>
+Date: Wed, 16 Mar 2022 16:44:31 +0100
+Subject: [PATCH] drivers: uart_nrfx_uarte: Fix USE_LOW_POWER macro for PINCTRL
+ case
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+This macro incorrectly uses DT_NODE_HAS_PROP() to check the truth value
+of the "disable-rx" boolean property. In consequence, it always assumes
+that RX is disabled and the low power mode needs to be used. Fix this
+by replacing the check with DT_PROP().
+
+Signed-off-by: Andrzej Głąbek <andrzej.glabek@nordicsemi.no>
+---
+ drivers/serial/uart_nrfx_uarte.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/serial/uart_nrfx_uarte.c b/drivers/serial/uart_nrfx_uarte.c
+index 94a616741a2..f1fbe985668 100644
+--- a/drivers/serial/uart_nrfx_uarte.c
++++ b/drivers/serial/uart_nrfx_uarte.c
+@@ -2027,7 +2027,7 @@ static int uarte_nrfx_pm_action(const struct device *dev,
+  * kconfig option is enabled.
+  */
+ #define USE_LOW_POWER(idx) \
+-	((!UARTE_HAS_PROP(idx, disable_rx) &&				       \
++	((!UARTE_PROP(idx, disable_rx) &&				       \
+ 	COND_CODE_1(CONFIG_UART_##idx##_ASYNC,				       \
+ 		(!IS_ENABLED(CONFIG_UART_##idx##_NRF_ASYNC_LOW_POWER)),	       \
+ 		(1))) ? 0 : UARTE_CFG_FLAG_LOW_POWER)

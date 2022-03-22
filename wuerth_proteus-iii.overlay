@@ -1,10 +1,60 @@
 / {
+	chosen {
+		zephyr,shell-uart = &uart0;
+	};
 	aliases {
 		pwm-led = &pwm0;
+		chip-temp = &temp;
+	};
+};
+
+&pinctrl {
+	uart1_default: uart1_default {
+		group1 {
+			psels = <NRF_PSEL(UART_RX, 0, 11)>;
+			bias-pull-up;
+		};
+		group2 {
+			psels = <NRF_PSEL(UART_TX, 0, 12)>;
+			drive-mode = <NRF_DRIVE_H0D1>;
+		};
+	};
+	uart1_sleep: uart1_sleep {
+		group1 {
+			psels = <NRF_PSEL(UART_RX, 0, 11)>,
+					<NRF_PSEL(UART_TX, 0, 12)>;
+			low-power-enable;
+		};
 	};
 };
 
 &pwm0 {
 	status = "okay";
 	ch0-pin = <0>;
+};
+
+&uart1 {
+	status = "okay";
+	current-speed = <115200>;
+	pinctrl-0 = <&uart1_default>;
+	pinctrl-1 = <&uart1_sleep>;
+	pinctrl-names = "default", "sleep";
+
+	w1_0: w1-zephyr-serial-0 {
+		    status = "okay";
+		    compatible = "zephyr,w1-serial";
+		    label = "W1_0";
+
+		    ds18b20 {
+			        status = "okay";
+			        compatible = "maxim,ds18b20";
+			        label = "DS18B20";
+			        family-code = <0x28>;
+			        resolution = <12>;
+		    };
+	};
+};
+
+&adc {
+	status = "okay";
 };
