@@ -5,6 +5,8 @@
 	aliases {
 		pwm-led = &pwm0;
 		chip-temp = &temp;
+		ext-temp = &ext_temp;
+		fuel-gauge = &fuel_gauge;
 	};
 };
 
@@ -33,6 +35,21 @@
 	ch0-pin = <0>;
 };
 
+&i2c0 {
+	status = "okay";
+	scl-pin = <7>;
+	// P1.00
+	sda-pin = <32>;
+
+	fuel_gauge: max17048@36 {
+		status = "okay";
+		compatible = "maxim,max17048";
+		label = "MAX17048";
+		reg = <0x36>;
+	};
+};
+
+
 &uart1 {
 	status = "okay";
 	current-speed = <115200>;
@@ -41,17 +58,17 @@
 	pinctrl-names = "default", "sleep";
 
 	w1_0: w1-zephyr-serial-0 {
-		    status = "okay";
-		    compatible = "zephyr,w1-serial";
-		    label = "W1_0";
+		status = "okay";
+		compatible = "zephyr,w1-serial";
+		label = "W1_0";
 
-		    ds18b20 {
-			        status = "okay";
-			        compatible = "maxim,ds18b20";
-			        label = "DS18B20";
-			        family-code = <0x28>;
-			        resolution = <12>;
-		    };
+		ext_temp: ds18b20 {
+			status = "okay";
+			compatible = "maxim,ds18b20";
+			label = "DS18B20";
+			family-code = <0x28>;
+			resolution = <12>;
+		};
 	};
 };
 

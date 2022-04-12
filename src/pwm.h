@@ -6,4 +6,14 @@
 
 #include <stdint.h>
 
-void set_duty_cycle(uint8_t percent);
+// defaults
+#define PWM_PERIOD 1000
+#define PWM_PULSE 1000
+
+struct pwm_params_t {
+    uint8_t duty_percent;
+    uint16_t pulse_length;
+};
+
+int setup_pwm(void);
+void set_duty_pulse(struct pwm_params_t *params);
