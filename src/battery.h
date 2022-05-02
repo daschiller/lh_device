@@ -4,5 +4,5 @@
  *  Copyright (c) 2022 David Schiller <david.schiller@jku.at>
  */
 
-int read_ext_temp(void);
-int read_board_temp(void);
+int read_soc(void);
+int read_voltage(void);

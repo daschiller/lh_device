@@ -32,23 +32,23 @@
 
 &pwm0 {
 	status = "okay";
-	ch0-pin = <0>;
+	// change to 1 for final PCB
+	ch0-pin = <1>;
 };
 
 &i2c0 {
 	status = "okay";
-	scl-pin = <7>;
-	// P1.00
-	sda-pin = <32>;
+	scl-pin = <22>;
+	sda-pin = <19>;
 
 	fuel_gauge: max17048@36 {
 		status = "okay";
 		compatible = "maxim,max17048";
 		label = "MAX17048";
+		enable-sleep;
 		reg = <0x36>;
 	};
 };
-
 
 &uart1 {
 	status = "okay";
@@ -72,6 +72,6 @@
 	};
 };
 
-&adc {
-	status = "okay";
-};
+// &adc {
+// 	status = "okay";
+// };

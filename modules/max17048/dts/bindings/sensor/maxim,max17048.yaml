@@ -3,3 +3,8 @@ description: Maxim MAX17048 Fuel Gauge
 compatible: "maxim,max17048"
 
 include: i2c-device.yaml
+
+properties:
+    enable-sleep:
+      type: boolean
+      description: Enable sleep in MODE register

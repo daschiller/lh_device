@@ -5,13 +5,14 @@
  */
 
 #include "pwm.h"
+#include "power.h"
 #include <logging/log.h>
 
 LOG_MODULE_REGISTER(pwm);
 
 #include <nrfx_pwm.h>
 
-#define PWM_PIN 0
+#define PWM_PIN 1
 
 static const nrfx_pwm_t pwm_instance = NRFX_PWM_INSTANCE(0);
 static const nrfx_pwm_config_t pwm_config =
@@ -46,13 +47,19 @@ int setup_pwm(void) {
 void set_duty_pulse(struct pwm_params_t *params) {
     if (params->duty_percent > 0 && params->duty_percent <= 100) {
         pwm_duty_cycle = PWM_PERIOD * (1 - params->duty_percent / 100.0);
+        // wake fuel gauge from hibernation for more accurate discharge tracking
+        pm_fuel_gauge(PM_DEVICE_ACTION_RESUME);
     } else if (params->duty_percent == 0) {
         nrfx_pwm_stop(&pwm_instance, true);
+        // hibernate fuel gauge
+        pm_fuel_gauge(PM_DEVICE_ACTION_SUSPEND);
         return;
     } else {
         // set to default
         params->duty_percent = 0;
         pwm_duty_cycle = PWM_PERIOD;
+        // hibernate fuel gauge
+        pm_fuel_gauge(PM_DEVICE_ACTION_SUSPEND);
     }
 
     if (params->pulse_length > 0 && params->pulse_length <= PWM_PERIOD) {

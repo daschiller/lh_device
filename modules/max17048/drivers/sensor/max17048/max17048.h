@@ -27,6 +27,8 @@ enum {
 enum {
     HIBRT_ON = 0xFFFF,
     HIBRT_OFF = 0x0000,
+    SLEEP = BIT(7),
+    ENSLEEP = BIT(13),
 };
 
 struct max17048_data {
@@ -41,6 +43,7 @@ struct max17048_data {
 
 struct max17048_config {
     char *bus_name;
+    bool enable_sleep;
 };
 
 #endif

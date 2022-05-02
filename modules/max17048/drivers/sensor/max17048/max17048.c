@@ -36,7 +36,7 @@ static int max17048_reg_read(struct max17048_data *priv, int reg_addr,
         LOG_ERR("Unable to read register");
         return rc;
     }
-    *valp = (i2c_data[1] << 8) | i2c_data[0];
+    *valp = (i2c_data[0] << 8) | i2c_data[1];
 
     return 0;
 }
@@ -64,7 +64,7 @@ static int max17048_channel_get(const struct device *dev,
                                 enum sensor_channel chan,
                                 struct sensor_value *valp) {
     struct max17048_data *const priv = dev->data;
-    unsigned int tmp;
+    uint32_t tmp;
 
     switch (chan) {
     case SENSOR_CHAN_GAUGE_VOLTAGE:
@@ -76,6 +76,18 @@ static int max17048_channel_get(const struct device *dev,
     case SENSOR_CHAN_GAUGE_STATE_OF_CHARGE:
         valp->val1 = priv->state_of_charge / 256;
         valp->val2 = priv->state_of_charge % 256 * 1000000 / 256;
+        break;
+    case SENSOR_CHAN_GAUGE_TIME_TO_EMPTY:
+        /* C-rate is in 0.208%/h */
+        tmp = priv->c_rate;
+        if (tmp > 0) {
+            valp->val1 = (priv->state_of_charge / 256) / (tmp * 26 / 125) * 60;
+            valp->val2 = 0; // TODO: implement fractional part
+        } else {
+            /* C-rate is too low */
+            valp->val1 = 0;
+            valp->val2 = 0;
+        }
         break;
     default:
         return -ENOTSUP;
@@ -94,6 +106,7 @@ static int max17048_sample_fetch(const struct device *dev,
     } regs[] = {
         {VCELL, &priv->voltage},
         {SOC, &priv->state_of_charge},
+        {CRATE, &priv->c_rate},
     };
 
     __ASSERT_NO_MSG(chan == SENSOR_CHAN_ALL);
@@ -101,8 +114,8 @@ static int max17048_sample_fetch(const struct device *dev,
 #ifdef CONFIG_PM_DEVICE
     enum pm_device_state state;
     (void)pm_device_state_get(dev, &state);
-    /* Do not allow sample fetching from suspended state */
-    if (state == PM_DEVICE_STATE_SUSPENDED)
+    /* Do not allow sample fetching from off state */
+    if (state == PM_DEVICE_STATE_OFF)
         return -EIO;
 #endif
 
@@ -123,7 +136,8 @@ static int max17048_sample_fetch(const struct device *dev,
 static int max17048_pm_action(const struct device *dev,
                               enum pm_device_action action) {
     struct max17048_data *priv = dev->data;
-    int ret = 0;
+    int ret;
+    uint16_t tmp;
 
     switch (action) {
     case PM_DEVICE_ACTION_RESUME:
@@ -132,6 +146,14 @@ static int max17048_pm_action(const struct device *dev,
 
     case PM_DEVICE_ACTION_SUSPEND:
         ret = max17048_reg_write(priv, HIBRT, HIBRT_ON);
+        break;
+
+    case PM_DEVICE_ACTION_TURN_OFF:
+        ret = max17048_reg_read(priv, CONFIG, &tmp);
+        if (!ret) {
+            tmp |= SLEEP;
+            ret = max17048_reg_write(priv, CONFIG, tmp);
+        }
         break;
 
     default:
@@ -150,9 +172,10 @@ static int max17048_pm_action(const struct device *dev,
  * @return -EINVAL if the I2C controller could not be found
  */
 static int max17048_gauge_init(const struct device *dev) {
-    int16_t tmp;
     struct max17048_data *priv = dev->data;
     const struct max17048_config *const config = dev->config;
+    int ret = 0;
+    uint16_t tmp;
 
     priv->i2c = device_get_binding(config->bus_name);
     if (!priv->i2c) {
@@ -164,7 +187,12 @@ static int max17048_gauge_init(const struct device *dev) {
         return -EIO;
     }
 
-    return 0;
+    if (config->enable_sleep) {
+        /* returns 0 or -EIO */
+        ret = max17048_reg_write(priv, MODE, ENSLEEP);
+    }
+
+    return ret;
 }
 
 static const struct sensor_driver_api max17048_battery_driver_api = {
@@ -177,6 +205,7 @@ static const struct sensor_driver_api max17048_battery_driver_api = {
                                                                                \
     static const struct max17048_config max17048_config_##index = {            \
         .bus_name = DT_INST_BUS_LABEL(index),                                  \
+        .enable_sleep = DT_INST_PROP(index, enable_sleep),                     \
     };                                                                         \
                                                                                \
     PM_DEVICE_DT_INST_DEFINE(index, max17048_pm_action);                       \

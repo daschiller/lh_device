@@ -5,6 +5,7 @@
  */
 
 #include "ble.h"
+#include "battery.h"
 #include "pwm.h"
 #include "temp.h"
 #include <bluetooth/bluetooth.h>
@@ -24,6 +25,9 @@
 #ifdef CONFIG_MCUMGR_CMD_IMG_MGMT
 #include "img_mgmt/img_mgmt.h"
 #endif
+#ifdef CONFIG_MCUMGR_CMD_SHELL_MGMT
+#include "shell_mgmt/shell_mgmt.h"
+#endif
 #ifdef CONFIG_MCUMGR_CMD_STAT_MGMT
 STATS_SECT_DECL(dev_stats) dev_stats;
 #endif
@@ -33,10 +37,10 @@ LOG_MODULE_REGISTER(ble);
 // BLE
 #define DEVICE_NAME "lh_device"
 #define DEVICE_NAME_LEN (sizeof(DEVICE_NAME) - 1)
-#define MIN_ADV_INTERVAL BT_GAP_ADV_SLOW_INT_MIN // 1 s
-#define MAX_ADV_INTERVAL BT_GAP_ADV_SLOW_INT_MAX // 1.2 s
-// #define MIN_ADV_INTERVAL BT_GAP_ADV_SLOW_INT_MIN * 9
-// #define MAX_ADV_INTERVAL BT_GAP_ADV_SLOW_INT_MAX * 8
+// #define MIN_ADV_INTERVAL BT_GAP_ADV_SLOW_INT_MIN // 1 s
+// #define MAX_ADV_INTERVAL BT_GAP_ADV_SLOW_INT_MAX // 1.2 s
+#define MIN_ADV_INTERVAL BT_GAP_ADV_SLOW_INT_MIN * 7
+#define MAX_ADV_INTERVAL BT_GAP_ADV_SLOW_INT_MAX * 7
 
 #define CPF_FORMAT_UINT8 0x04
 #define CPF_FORMAT_UINT16 0x06
@@ -45,6 +49,7 @@ LOG_MODULE_REGISTER(ble);
 #define CPF_UNIT_PERCENT 0x27AD
 #define CPF_UNIT_S 0x2703
 #define CPF_UNIT_C 0x272F
+#define CPF_UNIT_V 0x2728
 
 // PWM
 #define PWM_SERVICE_UUID 0xFFF0
@@ -72,9 +77,15 @@ static const struct bt_gatt_cpf pwm_timer_char_cpf = {
     .format = CPF_FORMAT_UINT32, .unit = CPF_UNIT_S};
 static struct pwm_params_t pwm_params = {.duty_percent = 0,
                                          .pulse_length = PWM_PULSE};
-static void turn_off(struct k_timer *dummy) {
+static void duty_pulse_handler(struct k_work *work) {
     pwm_params.duty_percent = 0;
     set_duty_pulse(&pwm_params);
+}
+K_WORK_DEFINE(duty_pulse_work, duty_pulse_handler);
+static void turn_off(struct k_timer *dummy) {
+    /* we need to run "set_duty_pulse" from the system work queue rather than the
+       idle thread to avoid timing issues and lockups */
+    k_work_submit(&duty_pulse_work);
 };
 static struct k_timer pwm_timer = {.expiry_fn = turn_off};
 
@@ -162,6 +173,7 @@ static ssize_t write_timer(struct bt_conn *conn,
         return BT_GATT_ERR(BT_ATT_ERR_INVALID_OFFSET);
     }
     memcpy(&value + offset, buf, len);
+    k_timer_stop(&pwm_timer);
     k_timer_start(&pwm_timer, K_MSEC(value * 1000), K_NO_WAIT);
     LOG_DBG("attribute = 0x%04X", value);
 
@@ -193,18 +205,24 @@ BT_GATT_SERVICE_DEFINE(
     BT_GATT_CUD("PWM timer", BT_GATT_PERM_READ),
     BT_GATT_CPF(&pwm_timer_char_cpf), );
 
-// TEMP
-#define TEMP_SERVICE_UUID 0xFFE0
+// SENSORS
+#define SENSOR_SERVICE_UUID 0xFFE0
 #define TEMP_EXT_CHAR_UUID 0xFFE1
+#define TEMP_BOARD_CHAR_UUID 0xFFE2
+#define BATT_VOLT_CHAR_UUID 0xFFE3
 
-static struct bt_uuid_16 temp_service_uuid = BT_UUID_INIT_16(TEMP_SERVICE_UUID);
+static struct bt_uuid_16 sensor_service_uuid =
+    BT_UUID_INIT_16(SENSOR_SERVICE_UUID);
 static const struct bt_uuid_16 temp_ext_char_uuid =
     BT_UUID_INIT_16(TEMP_EXT_CHAR_UUID);
-static const struct bt_gatt_cpf temp_ext_char_cpf = {
+static const struct bt_uuid_16 temp_board_char_uuid =
+    BT_UUID_INIT_16(TEMP_BOARD_CHAR_UUID);
+static const struct bt_gatt_cpf temp_char_cpf = {
     .format = CPF_FORMAT_SINT32, .exponent = -3, .unit = CPF_UNIT_C};
 
-static ssize_t read_temp(struct bt_conn *conn, const struct bt_gatt_attr *attr,
-                         void *buf, uint16_t len, uint16_t offset) {
+static ssize_t read_temp_ext(struct bt_conn *conn,
+                             const struct bt_gatt_attr *attr, void *buf,
+                             uint16_t len, uint16_t offset) {
     int32_t value;
 
     value = read_ext_temp();
@@ -212,13 +230,47 @@ static ssize_t read_temp(struct bt_conn *conn, const struct bt_gatt_attr *attr,
     return bt_gatt_attr_read(conn, attr, buf, sizeof(value), 0, &value,
                              sizeof(value));
 };
+static ssize_t read_temp_board(struct bt_conn *conn,
+                               const struct bt_gatt_attr *attr, void *buf,
+                               uint16_t len, uint16_t offset) {
+    int32_t value;
+
+    value = read_board_temp();
+    LOG_DBG("attribute = 0x%04X", value);
+    return bt_gatt_attr_read(conn, attr, buf, sizeof(value), 0, &value,
+                             sizeof(value));
+};
+
+static const struct bt_uuid_16 batt_volt_char_uuid =
+    BT_UUID_INIT_16(BATT_VOLT_CHAR_UUID);
+static const struct bt_gatt_cpf batt_volt_char_cpf = {
+    .format = CPF_FORMAT_SINT32, .exponent = -3, .unit = CPF_UNIT_V};
+
+static ssize_t read_batt_volts(struct bt_conn *conn,
+                               const struct bt_gatt_attr *attr, void *buf,
+                               uint16_t len, uint16_t offset) {
+    int32_t value;
+
+    value = read_voltage();
+    LOG_DBG("attribute = 0x%04X", value);
+    return bt_gatt_attr_read(conn, attr, buf, sizeof(value), 0, &value,
+                             sizeof(value));
+};
 
 BT_GATT_SERVICE_DEFINE(
-    temp_service, BT_GATT_PRIMARY_SERVICE(&temp_service_uuid),
+    sensor_service, BT_GATT_PRIMARY_SERVICE(&sensor_service_uuid),
     BT_GATT_CHARACTERISTIC(&temp_ext_char_uuid.uuid, BT_GATT_CHRC_READ,
-                           BT_GATT_PERM_READ, read_temp, NULL, NULL),
+                           BT_GATT_PERM_READ, read_temp_ext, NULL, NULL),
     BT_GATT_CUD("Probe temperature", BT_GATT_PERM_READ),
-    BT_GATT_CPF(&temp_ext_char_cpf), );
+    BT_GATT_CPF(&temp_char_cpf),
+    BT_GATT_CHARACTERISTIC(&temp_board_char_uuid.uuid, BT_GATT_CHRC_READ,
+                           BT_GATT_PERM_READ, read_temp_board, NULL, NULL),
+    BT_GATT_CUD("Board temperature", BT_GATT_PERM_READ),
+    BT_GATT_CPF(&temp_char_cpf),
+    BT_GATT_CHARACTERISTIC(&batt_volt_char_uuid.uuid, BT_GATT_CHRC_READ,
+                           BT_GATT_PERM_READ, read_batt_volts, NULL, NULL),
+    BT_GATT_CUD("Battery voltage", BT_GATT_PERM_READ),
+    BT_GATT_CPF(&batt_volt_char_cpf), );
 
 static const struct bt_data ad[] = {
     BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
@@ -283,6 +335,7 @@ int setup_ble(void) {
     os_mgmt_register_group();
     img_mgmt_register_group();
     stat_mgmt_register_group();
+    shell_mgmt_register_group();
     err = smp_bt_register();
     if (err) {
         LOG_ERR("BT SMP failed to register (err %d)", err);

@@ -18,5 +18,7 @@ target_sources(app PRIVATE
   src/ble.c
   src/pwm.c
   src/temp.c
-  src/adc.c
+  # src/adc.c
+  src/battery.c
+  src/power.c
 )

@@ -4,94 +4,67 @@
  *  Copyright (c) 2022 David Schiller <david.schiller@jku.at>
  */
 
-#include "adc.h"
+#include "battery.h"
 #include "ble.h"
+#include "power.h"
 #include "temp.h"
 #include <bluetooth/services/bas.h>
-#include <drivers/sensor.h>
-#include <drivers/uart.h>
+#include <drivers/watchdog.h>
 #include <logging/log.h>
 #include <pm/device.h>
 
 LOG_MODULE_REGISTER(main);
 
-#define NRF_UART_ERRATUM
 #define LOW_POWER
-
-#ifdef LOW_POWER
-static int pm_devices(enum pm_device_action action) {
-    int err;
-
-#ifdef NRF_UART_ERRATUM
-    if (action == PM_DEVICE_ACTION_SUSPEND) {
-        // ERRATUM: properly power down UARTE1 to reduce current consumption
-        // https://devzone.nordicsemi.com/f/nordic-q-a/26030/how-to-reach-nrf52840-uarte-current-supply-specification/184882#184882
-        // https://devzone.nordicsemi.com/f/nordic-q-a/59407/simple-question-about-the-peripheral-reset-code
-        NRF_UARTE1->TASKS_STOPRX = 1;
-        while (!NRF_UARTE1->EVENTS_RXTO) {
-        }
-    }
-#endif
-    // const struct device *fuel_dev = DEVICE_DT_GET(DT_ALIAS(fuel_gauge));
-    // err = pm_device_action_run(fuel_dev, action);
-    // if (err) {
-    //     LOG_ERR("Fuel gauge action failed (err %d)", err);
-    //     return err;
-    // }
-
-    const struct device *uart1_dev = DEVICE_DT_GET(DT_NODELABEL(uart1));
-    err = pm_device_action_run(uart1_dev, action);
-    if (err) {
-        LOG_ERR("UART1 action failed (err %d)", err);
-        return err;
-    }
-
-    const struct device *uart0_dev = DEVICE_DT_GET(DT_CHOSEN(zephyr_console));
-    err = pm_device_action_run(uart0_dev, action);
-    if (err) {
-        LOG_ERR("UART (console) action failed (err %d)", err);
-        return err;
-    }
-
-    return 0;
-}
-#endif /* LOW_POWER */
+#define LOG_INTERVAL 30000
+#define WDT_INTERVAL (2 * LOG_INTERVAL)
 
 extern STATS_SECT_DECL(dev_stats) dev_stats;
+static const struct device *wdt_dev = DEVICE_DT_GET(DT_NODELABEL(wdt));
+static int wdt_channel;
+
+int setup_watchdog(void) {
+    const struct wdt_timeout_cfg wdt_cfg = {
+        .window = (struct wdt_window){0, WDT_INTERVAL},
+        .flags = WDT_FLAG_RESET_SOC,
+    };
+
+    wdt_channel = wdt_install_timeout(wdt_dev, &wdt_cfg);
+    if (wdt_channel >= 0) {
+        return wdt_setup(wdt_dev, WDT_OPT_PAUSE_HALTED_BY_DBG);
+    } else {
+        return wdt_channel;
+    }
+}
 
 void main(void) {
+    int err;
+
     printk("Starting LionHearted device ...\n");
     printk("Build time: " __DATE__ " " __TIME__ "\n");
+    printk("Reset reason: 0x%X\n", NRF_POWER->RESETREAS);
+
+    err = setup_watchdog();
+    if (err) {
+        LOG_ERR("WDT setup failed (err %d)", err);
+    }
+    wdt_feed(wdt_dev, wdt_channel);
 
     setup_ble();
 
-    printk("Temperature (chip): %f\n", read_chip_temp() / 1000.0);
-    printk("Temperature (probe): %f\n", read_ext_temp() / 1000.0);
-    printk("ADC: %f\n", read_adc() / 1000.0);
-
 #ifdef LOW_POWER
-    // pm_devices(PM_DEVICE_ACTION_SUSPEND);
+    pm_console(PM_DEVICE_ACTION_SUSPEND);
+    pm_w1(PM_DEVICE_ACTION_SUSPEND);
+    pm_fuel_gauge(PM_DEVICE_ACTION_SUSPEND);
+    // k_sleep(K_FOREVER);
 #endif
 
-    // k_sleep(K_FOREVER);
-
-    const struct device *fuel_dev = DEVICE_DT_GET(DT_ALIAS(fuel_gauge));
-    struct sensor_value voltage;
-    sensor_sample_fetch(fuel_dev);
-    sensor_channel_get(fuel_dev, SENSOR_CHAN_GAUGE_VOLTAGE, &voltage);
-
-    uint8_t level = 100;
-    bt_bas_set_battery_level(level);
     for (;;) {
+        wdt_feed(wdt_dev, wdt_channel);
         STATS_SET(dev_stats, uptime_s, k_uptime_get() / 1000);
-        printk("Batt: %d\n", bt_bas_get_battery_level());
-        if (bt_bas_set_battery_level(--level) == -EINVAL) {
-            level = 100;
-        }
-        pm_devices(PM_DEVICE_ACTION_SUSPEND);
-        k_msleep(5000);
-        pm_devices(PM_DEVICE_ACTION_RESUME);
-        printk("\nwakeup\n");
-        // printk("Temperature (probe): %f\n", read_ext_temp() / 1000.0);
+        bt_bas_set_battery_level(read_soc());
+        LOG_DBG("Batt: %d %%", bt_bas_get_battery_level());
+        LOG_DBG("Batt (voltage): %d mV", read_voltage());
+        k_msleep(LOG_INTERVAL);
     }
 }
