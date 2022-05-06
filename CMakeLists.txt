@@ -21,4 +21,5 @@ target_sources(app PRIVATE
   # src/adc.c
   src/battery.c
   src/power.c
+  src/storage.c
 )

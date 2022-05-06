@@ -1,7 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
 /*
- * Copyright 2020 Google LLC
- *
- * SPDX-License-Identifier: Apache-2.0
+ *  Copyright (c) 2022 David Schiller <david.schiller@jku.at>
  */
 
 #ifndef ZEPHYR_DRIVERS_SENSOR_BATTERY_MAX17048_H_

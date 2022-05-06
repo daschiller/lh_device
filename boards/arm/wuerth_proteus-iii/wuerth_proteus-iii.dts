@@ -24,6 +24,7 @@
 		};
 		group2 {
 			psels = <NRF_PSEL(UART_RX, 1, 9)>;
+			bias-pull-up;
 		};
 	};
 	uart0_sleep: uart0_sleep {
@@ -53,10 +54,14 @@
 
 		code_partition: partition@0 {
 			label = "code";
-			reg = <0x0 DT_SIZE_K(1016)>;
+			reg = <0x0 DT_SIZE_K(992)>;
 		};
-		storage_partition: partition@fe000 {
+		storage_partition: partition@f8000 {
 			label = "storage";
+			reg = <DT_SIZE_K(992) DT_SIZE_K(24)>;
+		};
+		lfs_partition: partition@fe000 {
+			label = "lfs";
 			reg = <DT_SIZE_K(1016) DT_SIZE_K(8)>;
 		};
 	};

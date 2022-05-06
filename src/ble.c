@@ -28,6 +28,9 @@
 #ifdef CONFIG_MCUMGR_CMD_SHELL_MGMT
 #include "shell_mgmt/shell_mgmt.h"
 #endif
+#ifdef CONFIG_MCUMGR_CMD_SHELL_MGMT
+#include "fs_mgmt/fs_mgmt.h"
+#endif
 #ifdef CONFIG_MCUMGR_CMD_STAT_MGMT
 STATS_SECT_DECL(dev_stats) dev_stats;
 #endif
@@ -336,6 +339,7 @@ int setup_ble(void) {
     img_mgmt_register_group();
     stat_mgmt_register_group();
     shell_mgmt_register_group();
+    fs_mgmt_register_group();
     err = smp_bt_register();
     if (err) {
         LOG_ERR("BT SMP failed to register (err %d)", err);

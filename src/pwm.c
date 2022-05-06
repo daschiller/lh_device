@@ -34,8 +34,6 @@ static nrf_pwm_sequence_t pwm_seq_1 = {.values.p_common = &pwm_off,
 int setup_pwm(void) {
     nrfx_err_t err;
 
-    // PWM is already initialized by Zephyr -> undo
-    nrfx_pwm_uninit(&pwm_instance);
     err = nrfx_pwm_init(&pwm_instance, &pwm_config, NULL, NULL);
     if (err != NRFX_SUCCESS) {
         LOG_ERR("init failed (err %d)", err);

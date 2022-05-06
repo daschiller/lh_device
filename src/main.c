@@ -7,6 +7,7 @@
 #include "battery.h"
 #include "ble.h"
 #include "power.h"
+#include "storage.h"
 #include "temp.h"
 #include <bluetooth/services/bas.h>
 #include <drivers/watchdog.h>
@@ -16,7 +17,7 @@
 LOG_MODULE_REGISTER(main);
 
 #define LOW_POWER
-#define LOG_INTERVAL 30000
+#define LOG_INTERVAL 60000
 #define WDT_INTERVAL (2 * LOG_INTERVAL)
 
 extern STATS_SECT_DECL(dev_stats) dev_stats;
@@ -39,10 +40,25 @@ int setup_watchdog(void) {
 
 void main(void) {
     int err;
+    int reboot_count = -1;
 
     printk("Starting LionHearted device ...\n");
     printk("Build time: " __DATE__ " " __TIME__ "\n");
     printk("Reset reason: 0x%X\n", NRF_POWER->RESETREAS);
+
+    err = setup_storage();
+    if (err) {
+        LOG_ERR("Storage setup failed (err %d)", err);
+    } else {
+        reboot_count = read_storage_i32(REBOOT_ID);
+        if (reboot_count < 0) {
+            write_storage_i32(REBOOT_ID, 0);
+        } else {
+            write_storage_i32(REBOOT_ID, ++reboot_count);
+        }
+        reboot_count = read_storage_i32(REBOOT_ID);
+        printk("Reboot count: %d\n", reboot_count);
+    }
 
     err = setup_watchdog();
     if (err) {
@@ -51,12 +67,14 @@ void main(void) {
     wdt_feed(wdt_dev, wdt_channel);
 
     setup_ble();
+    STATS_SET(dev_stats, reset_reason, NRF_POWER->RESETREAS);
+    STATS_SET(dev_stats, reboots, reboot_count);
+    printk("\n");
 
 #ifdef LOW_POWER
     pm_console(PM_DEVICE_ACTION_SUSPEND);
     pm_w1(PM_DEVICE_ACTION_SUSPEND);
     pm_fuel_gauge(PM_DEVICE_ACTION_SUSPEND);
-    // k_sleep(K_FOREVER);
 #endif
 
     for (;;) {
