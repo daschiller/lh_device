@@ -16,8 +16,9 @@
 
 LOG_MODULE_REGISTER(main);
 
+#define SERIALNO "001"
 #define LOW_POWER
-#define LOG_INTERVAL 60000
+#define LOG_INTERVAL 300000
 #define WDT_INTERVAL (2 * LOG_INTERVAL)
 
 extern STATS_SECT_DECL(dev_stats) dev_stats;
@@ -43,6 +44,7 @@ void main(void) {
     int reboot_count = -1;
 
     printk("Starting LionHearted device ...\n");
+    printk("Serial No.: " SERIALNO "\n");
     printk("Build time: " __DATE__ " " __TIME__ "\n");
     printk("Reset reason: 0x%X\n", NRF_POWER->RESETREAS);
 
@@ -83,6 +85,7 @@ void main(void) {
         bt_bas_set_battery_level(read_soc());
         LOG_DBG("Batt: %d %%", bt_bas_get_battery_level());
         LOG_DBG("Batt (voltage): %d mV", read_voltage());
+        update_adv();
         k_msleep(LOG_INTERVAL);
     }
 }

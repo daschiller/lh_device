@@ -23,3 +23,4 @@ STATS_NAME_END(dev_stats);
 #endif
 
 int setup_ble(void);
+void update_adv(void);

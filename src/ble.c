@@ -38,7 +38,7 @@ STATS_SECT_DECL(dev_stats) dev_stats;
 LOG_MODULE_REGISTER(ble);
 
 // BLE
-#define DEVICE_NAME "lh_device"
+#define DEVICE_NAME "lh_device_1"
 #define DEVICE_NAME_LEN (sizeof(DEVICE_NAME) - 1)
 // #define MIN_ADV_INTERVAL BT_GAP_ADV_SLOW_INT_MIN // 1 s
 // #define MAX_ADV_INTERVAL BT_GAP_ADV_SLOW_INT_MAX // 1.2 s
@@ -86,8 +86,8 @@ static void duty_pulse_handler(struct k_work *work) {
 }
 K_WORK_DEFINE(duty_pulse_work, duty_pulse_handler);
 static void turn_off(struct k_timer *dummy) {
-    /* we need to run "set_duty_pulse" from the system work queue rather than the
-       idle thread to avoid timing issues and lockups */
+    /* we need to run "set_duty_pulse" from the system work queue rather than
+       the idle thread to avoid timing issues and lockups */
     k_work_submit(&duty_pulse_work);
 };
 static struct k_timer pwm_timer = {.expiry_fn = turn_off};
@@ -281,13 +281,14 @@ static const struct bt_data ad[] = {
     // "Generic Light Source" appearance
     BT_DATA_BYTES(BT_DATA_GAP_APPEARANCE, 0xC0, 0x07),
 };
-static const struct bt_data sd[] = {
+static struct bt_data sd[] = {
     // PWM service
     BT_DATA_BYTES(BT_DATA_UUID16_ALL, BT_UUID_16_ENCODE(PWM_SERVICE_UUID)),
     // OTA service
     BT_DATA_BYTES(
         BT_DATA_UUID128_ALL,
         BT_UUID_128_ENCODE(0x8d53dc1d, 0x1db7, 0x4cd3, 0x868b, 0x8a527460aa84)),
+    BT_DATA_BYTES(BT_DATA_MANUFACTURER_DATA, 0x59, 0x00, 0x00, 0x00, 0x00),
 };
 static const struct bt_le_adv_param adv_params = BT_LE_ADV_PARAM_INIT(
     BT_LE_ADV_OPT_CONNECTABLE, MIN_ADV_INTERVAL, MAX_ADV_INTERVAL, NULL);
@@ -328,6 +329,14 @@ int setup_ble(void) {
         }
     }
 
+    bt_addr_le_t addr;
+    bt_id_get(&addr, NULL);
+    printk("BT address: ");
+    for (int i = BT_ADDR_SIZE - 1; i > 0; i--) {
+        printk("%X-", addr.a.val[i]);
+    }
+    printk("%X\n", addr.a.val[0]);
+
     err = bt_le_adv_start(&adv_params, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
     if (err) {
         LOG_ERR("Advertising failed to start (err %d)", err);
@@ -350,4 +359,11 @@ int setup_ble(void) {
     setup_pwm();
 
     return 0;
+}
+
+void update_adv() {
+    uint16_t temp = read_ext_temp();
+    uint8_t soc = read_soc();
+    sd[ARRAY_SIZE(sd) - 1].data = (uint8_t[]){0x59, 0x00, temp, temp >> 8, soc};
+    bt_le_adv_update_data(ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
 }
