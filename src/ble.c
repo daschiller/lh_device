@@ -38,7 +38,7 @@ STATS_SECT_DECL(dev_stats) dev_stats;
 LOG_MODULE_REGISTER(ble);
 
 // BLE
-#define DEVICE_NAME "lh_device_1"
+#define DEVICE_NAME CONFIG_BT_DEVICE_NAME
 #define DEVICE_NAME_LEN (sizeof(DEVICE_NAME) - 1)
 // #define MIN_ADV_INTERVAL BT_GAP_ADV_SLOW_INT_MIN // 1 s
 // #define MAX_ADV_INTERVAL BT_GAP_ADV_SLOW_INT_MAX // 1.2 s

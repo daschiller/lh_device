@@ -1,0 +1,8 @@
+1.0.0 (2022-06-29)
+==================
+- initial release
+
+1.0.1 (2022-07-21)
+==================
+- fix temperature conversion bug in DS18B20 driver
+  (https://github.com/zephyrproject-rtos/zephyr/pull/37663#discussion_r846608742)
