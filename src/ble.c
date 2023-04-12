@@ -8,16 +8,16 @@
 #include "battery.h"
 #include "pwm.h"
 #include "temp.h"
-#include <bluetooth/bluetooth.h>
-#include <bluetooth/conn.h>
-#include <bluetooth/gatt.h>
-#include <bluetooth/uuid.h>
-#include <logging/log.h>
-#include <settings/settings.h>
+#include <zephyr/bluetooth/bluetooth.h>
+#include <zephyr/bluetooth/conn.h>
+#include <zephyr/bluetooth/gatt.h>
+#include <zephyr/bluetooth/uuid.h>
+#include <zephyr/logging/log.h>
+#include <zephyr/settings/settings.h>
 
 // OTA
 #ifdef CONFIG_MCUMGR_SMP_BT
-#include <mgmt/mcumgr/smp_bt.h>
+#include <zephyr/mgmt/mcumgr/smp_bt.h>
 #endif
 #ifdef CONFIG_MCUMGR_CMD_OS_MGMT
 #include "os_mgmt/os_mgmt.h"

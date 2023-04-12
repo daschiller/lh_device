@@ -4,7 +4,7 @@
  *  Copyright (c) 2022 David Schiller <david.schiller@jku.at>
  */
 
-#include <drivers/adc.h>
+#include <zephyr/drivers/adc.h>
 
 #define AIN1 2
 #define RESOLUTION 12

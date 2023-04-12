@@ -7,6 +7,8 @@
 #ifndef ZEPHYR_DRIVERS_SENSOR_BATTERY_MAX17048_H_
 #define ZEPHYR_DRIVERS_SENSOR_BATTERY_MAX17048_H_
 
+#include <zephyr/drivers/i2c.h>
+
 /* Register addresses */
 enum {
     VCELL = 0x02,
@@ -32,7 +34,6 @@ enum {
 };
 
 struct max17048_data {
-    const struct device *i2c;
     /* Current cell voltage in units of 78.125 uV */
     uint16_t voltage;
     /* Remaining capacity in 1% / 256 */
@@ -42,7 +43,7 @@ struct max17048_data {
 };
 
 struct max17048_config {
-    char *bus_name;
+    struct i2c_dt_spec i2c;
     bool enable_sleep;
 };
 

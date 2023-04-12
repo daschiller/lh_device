@@ -4,12 +4,11 @@
  *  Copyright (c) 2022 David Schiller <david.schiller@jku.at>
  */
 
-#include <drivers/i2c.h>
-#include <drivers/sensor.h>
-#include <pm/device.h>
-#include <sys/byteorder.h>
+#include <zephyr/drivers/sensor.h>
+#include <zephyr/pm/device.h>
+#include <zephyr/sys/byteorder.h>
 
-#include <logging/log.h>
+#include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(max17048, CONFIG_SENSOR_LOG_LEVEL);
 
 #include "max17048.h"
@@ -26,12 +25,13 @@ LOG_MODULE_REGISTER(max17048, CONFIG_SENSOR_LOG_LEVEL);
  * @param val Place to put the value on success
  * @return 0 if successful, or negative error code from I2C API
  */
-static int max17048_reg_read(struct max17048_data *priv, int reg_addr,
+static int max17048_reg_read(const struct device *dev, int reg_addr,
                              int16_t *valp) {
+    const struct max17048_config *config = dev->config;
     uint8_t i2c_data[2];
     int rc;
 
-    rc = i2c_burst_read(priv->i2c, DT_INST_REG_ADDR(0), reg_addr, i2c_data, 2);
+    rc = i2c_burst_read_dt(&config->i2c, reg_addr, i2c_data, 2);
     if (rc < 0) {
         LOG_ERR("Unable to read register");
         return rc;
@@ -41,14 +41,15 @@ static int max17048_reg_read(struct max17048_data *priv, int reg_addr,
     return 0;
 }
 
-static int max17048_reg_write(struct max17048_data *priv, int reg_addr,
+static int max17048_reg_write(const struct device *dev, int reg_addr,
                               uint16_t val) {
+    const struct max17048_config *config = dev->config;
     uint8_t buf[3];
 
     buf[0] = (uint8_t)reg_addr;
     sys_put_le16(val, &buf[1]);
 
-    return i2c_write(priv->i2c, buf, sizeof(buf), DT_INST_REG_ADDR(0));
+    return i2c_write_dt(&config->i2c, buf, sizeof(buf));
 }
 
 /**
@@ -122,7 +123,7 @@ static int max17048_sample_fetch(const struct device *dev,
     for (size_t i = 0; i < ARRAY_SIZE(regs); i++) {
         int rc;
 
-        rc = max17048_reg_read(priv, regs[i].reg_addr, regs[i].dest);
+        rc = max17048_reg_read(dev, regs[i].reg_addr, regs[i].dest);
         if (rc != 0) {
             LOG_ERR("Failed to read channel %d", chan);
             return rc;
@@ -135,24 +136,23 @@ static int max17048_sample_fetch(const struct device *dev,
 #ifdef CONFIG_PM
 static int max17048_pm_action(const struct device *dev,
                               enum pm_device_action action) {
-    struct max17048_data *priv = dev->data;
     int ret;
     uint16_t tmp;
 
     switch (action) {
     case PM_DEVICE_ACTION_RESUME:
-        ret = max17048_reg_write(priv, HIBRT, HIBRT_OFF);
+        ret = max17048_reg_write(dev, HIBRT, HIBRT_OFF);
         break;
 
     case PM_DEVICE_ACTION_SUSPEND:
-        ret = max17048_reg_write(priv, HIBRT, HIBRT_ON);
+        ret = max17048_reg_write(dev, HIBRT, HIBRT_ON);
         break;
 
     case PM_DEVICE_ACTION_TURN_OFF:
-        ret = max17048_reg_read(priv, CONFIG, &tmp);
+        ret = max17048_reg_read(dev, CONFIG, &tmp);
         if (!ret) {
             tmp |= SLEEP;
-            ret = max17048_reg_write(priv, CONFIG, tmp);
+            ret = max17048_reg_write(dev, CONFIG, tmp);
         }
         break;
 
@@ -172,24 +172,22 @@ static int max17048_pm_action(const struct device *dev,
  * @return -EINVAL if the I2C controller could not be found
  */
 static int max17048_gauge_init(const struct device *dev) {
-    struct max17048_data *priv = dev->data;
     const struct max17048_config *const config = dev->config;
     int ret = 0;
     uint16_t tmp;
 
-    priv->i2c = device_get_binding(config->bus_name);
-    if (!priv->i2c) {
-        LOG_ERR("Could not get pointer to %s device", config->bus_name);
-        return -EINVAL;
+    if (!device_is_ready(config->i2c.bus)) {
+        LOG_ERR("Bus device is not ready");
+        return -ENODEV;
     }
 
-    if (max17048_reg_read(priv, STATUS, &tmp)) {
+    if (max17048_reg_read(dev, STATUS, &tmp)) {
         return -EIO;
     }
 
     if (config->enable_sleep) {
         /* returns 0 or -EIO */
-        ret = max17048_reg_write(priv, MODE, ENSLEEP);
+        ret = max17048_reg_write(dev, MODE, ENSLEEP);
     }
 
     return ret;
@@ -204,7 +202,7 @@ static const struct sensor_driver_api max17048_battery_driver_api = {
     static struct max17048_data max17048_driver_##index;                       \
                                                                                \
     static const struct max17048_config max17048_config_##index = {            \
-        .bus_name = DT_INST_BUS_LABEL(index),                                  \
+        .i2c = I2C_DT_SPEC_INST_GET(index),                                    \
         .enable_sleep = DT_INST_PROP(index, enable_sleep),                     \
     };                                                                         \
                                                                                \
@@ -213,7 +211,7 @@ static const struct sensor_driver_api max17048_battery_driver_api = {
     /* NOTE: replace PM_DEVICE_DT_INST_REF with PM_DEVICE_DT_INST_GET in the   \
      * future */                                                               \
     DEVICE_DT_INST_DEFINE(                                                     \
-        index, &max17048_gauge_init, PM_DEVICE_DT_INST_REF(index),             \
+        index, &max17048_gauge_init, PM_DEVICE_DT_INST_GET(index),             \
         &max17048_driver_##index, &max17048_config_##index, POST_KERNEL,       \
         CONFIG_SENSOR_INIT_PRIORITY, &max17048_battery_driver_api);
 

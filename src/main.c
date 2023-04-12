@@ -9,10 +9,10 @@
 #include "power.h"
 #include "storage.h"
 #include "temp.h"
-#include <bluetooth/services/bas.h>
-#include <drivers/watchdog.h>
-#include <logging/log.h>
-#include <pm/device.h>
+#include <zephyr/bluetooth/services/bas.h>
+#include <zephyr/drivers/watchdog.h>
+#include <zephyr/logging/log.h>
+#include <zephyr/pm/device.h>
 
 LOG_MODULE_REGISTER(main);
 

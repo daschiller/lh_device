@@ -5,7 +5,7 @@
  */
 
 #include "power.h"
-#include <drivers/sensor.h>
+#include <zephyr/drivers/sensor.h>
 
 static const struct device *fuel_dev = DEVICE_DT_GET(DT_ALIAS(fuel_gauge));
 

@@ -4,7 +4,7 @@
  *  Copyright (c) 2022 David Schiller <david.schiller@jku.at>
  */
 
-#include <pm/device.h>
+#include <zephyr/pm/device.h>
 
 int pm_console(enum pm_device_action action);
 int pm_fuel_gauge(enum pm_device_action action);

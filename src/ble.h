@@ -8,7 +8,7 @@
 
 #ifdef CONFIG_MCUMGR_CMD_STAT_MGMT
 #include "stat_mgmt/stat_mgmt.h"
-#include <stats/stats.h>
+#include <zephyr/stats/stats.h>
 STATS_SECT_START(dev_stats)
 STATS_SECT_ENTRY(uptime_s)
 STATS_SECT_ENTRY(reboots)

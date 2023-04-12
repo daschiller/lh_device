@@ -5,7 +5,7 @@
  */
 
 #include "power.h"
-#include <logging/log.h>
+#include <zephyr/logging/log.h>
 
 #define NRF_UART_ERRATUM
 

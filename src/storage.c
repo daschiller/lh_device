@@ -4,10 +4,10 @@
  *  Copyright (c) 2022 David Schiller <david.schiller@jku.at>
  */
 
-#include <drivers/flash.h>
-#include <fs/nvs.h>
-#include <logging/log.h>
-#include <storage/flash_map.h>
+#include <zephyr/drivers/flash.h>
+#include <zephyr/fs/nvs.h>
+#include <zephyr/logging/log.h>
+#include <zephyr/storage/flash_map.h>
 
 LOG_MODULE_REGISTER(storage);
 
@@ -16,15 +16,14 @@ static struct nvs_fs fs;
 int setup_storage(void) {
     int err;
     struct flash_pages_info info;
-    const struct device *flash_dev;
 
-    flash_dev = FLASH_AREA_DEVICE(storage);
-    if (!device_is_ready(flash_dev)) {
-        LOG_ERR("Flash device %s is not ready\n", flash_dev->name);
+    fs.flash_device = FLASH_AREA_DEVICE(storage);
+    if (!device_is_ready(fs.flash_device)) {
+        LOG_ERR("Flash device %s is not ready\n", fs.flash_device->name);
         return -EIO;
     }
     fs.offset = FLASH_AREA_OFFSET(storage);
-    err = flash_get_page_info_by_offs(flash_dev, fs.offset, &info);
+    err = flash_get_page_info_by_offs(fs.flash_device, fs.offset, &info);
     if (err) {
         LOG_ERR("Unable to get page info\n");
         return err;
@@ -32,7 +31,7 @@ int setup_storage(void) {
     fs.sector_size = info.size;
     fs.sector_count = 2U; // 8096 bytes on nRF52840
 
-    err = nvs_init(&fs, flash_dev->name);
+    err = nvs_mount(&fs);
     if (err) {
         LOG_ERR("Flash Init failed\n");
         return err;
