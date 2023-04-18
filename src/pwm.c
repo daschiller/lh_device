@@ -19,16 +19,18 @@ static const nrfx_pwm_config_t pwm_config =
     NRFX_PWM_DEFAULT_CONFIG(PWM_PIN, NRFX_PWM_PIN_NOT_USED,
                             NRFX_PWM_PIN_NOT_USED, NRFX_PWM_PIN_NOT_USED);
 static nrf_pwm_values_common_t pwm_duty_cycle = PWM_PERIOD;
-static nrf_pwm_values_common_t pwm_off = PWM_PERIOD;
+// The second sequence needs to have more than one element due to erratum 183.
+// More info here:
+// https://devzone.nordicsemi.com/f/nordic-q-a/27891/pwm-finish-flag/110046#110046
+static nrf_pwm_values_common_t pwm_off[2] = {PWM_PERIOD, PWM_PERIOD};
 static nrf_pwm_sequence_t pwm_seq_0 = {.values.p_common = &pwm_duty_cycle,
                                        .length = sizeof(pwm_duty_cycle) /
                                                  sizeof(uint16_t),
                                        .repeats = PWM_PULSE,
                                        .end_delay = 0};
-static nrf_pwm_sequence_t pwm_seq_1 = {.values.p_common = &pwm_off,
-                                       .length =
-                                           sizeof(pwm_off) / sizeof(uint16_t),
-                                       .repeats = PWM_PERIOD - PWM_PULSE,
+static nrf_pwm_sequence_t pwm_seq_1 = {.values.p_common = pwm_off,
+                                       .length = ARRAY_SIZE(pwm_off),
+                                       .repeats = (PWM_PERIOD - PWM_PULSE) / 2,
                                        .end_delay = 0};
 
 int setup_pwm(void) {
@@ -62,16 +64,16 @@ void set_duty_pulse(struct pwm_params_t *params) {
 
     if (params->pulse_length > 0 && params->pulse_length <= PWM_PERIOD) {
         pwm_seq_0.repeats = params->pulse_length;
-        pwm_seq_1.repeats = PWM_PERIOD - params->pulse_length;
+        pwm_seq_1.repeats = (PWM_PERIOD - params->pulse_length) / 2;
     } else {
         // set to default
         params->pulse_length = PWM_PULSE;
         pwm_seq_0.repeats = PWM_PULSE;
-        pwm_seq_1.repeats = PWM_PERIOD - PWM_PULSE;
+        pwm_seq_1.repeats = (PWM_PERIOD - PWM_PULSE) / 2;
     }
 
     LOG_DBG("duty_cycle = %u", pwm_duty_cycle);
     LOG_DBG("pulse_length = %u", pwm_seq_0.repeats);
-    nrfx_pwm_complex_playback(&pwm_instance, &pwm_seq_0, &pwm_seq_1, 2,
+    nrfx_pwm_complex_playback(&pwm_instance, &pwm_seq_0, &pwm_seq_1, 1,
                               NRFX_PWM_FLAG_LOOP);
 }
