@@ -6,3 +6,10 @@
 ==================
 - fix temperature conversion bug in DS18B20 driver
   (https://github.com/zephyrproject-rtos/zephyr/pull/37663#discussion_r846608742)
+
+1.0.2 (2023-05-03)
+==================
+- update to NCS 2.2.0
+- "passive scanning" now possible
+  (sensor data is sent in initial advertisement packet, not in scan response)
+- PWM pulse length fixed (was twice as long as requested before)

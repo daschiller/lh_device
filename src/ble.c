@@ -42,8 +42,8 @@ LOG_MODULE_REGISTER(ble);
 #define DEVICE_NAME_LEN (sizeof(DEVICE_NAME) - 1)
 // #define MIN_ADV_INTERVAL BT_GAP_ADV_SLOW_INT_MIN // 1 s
 // #define MAX_ADV_INTERVAL BT_GAP_ADV_SLOW_INT_MAX // 1.2 s
-#define MIN_ADV_INTERVAL BT_GAP_ADV_SLOW_INT_MIN * 7
-#define MAX_ADV_INTERVAL BT_GAP_ADV_SLOW_INT_MAX * 7
+#define MIN_ADV_INTERVAL BT_GAP_ADV_SLOW_INT_MIN * 2
+#define MAX_ADV_INTERVAL BT_GAP_ADV_SLOW_INT_MAX * 2
 
 #define CPF_FORMAT_UINT8 0x04
 #define CPF_FORMAT_UINT16 0x06
@@ -275,23 +275,27 @@ BT_GATT_SERVICE_DEFINE(
     BT_GATT_CUD("Battery voltage", BT_GATT_PERM_READ),
     BT_GATT_CPF(&batt_volt_char_cpf), );
 
-static const struct bt_data ad[] = {
+static struct bt_data ad[] = {
     BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
     BT_DATA(BT_DATA_NAME_COMPLETE, DEVICE_NAME, DEVICE_NAME_LEN),
     // "Generic Light Source" appearance
-    BT_DATA_BYTES(BT_DATA_GAP_APPEARANCE, 0xC0, 0x07),
-};
-static struct bt_data sd[] = {
+    // BT_DATA_BYTES(BT_DATA_GAP_APPEARANCE, 0xC0, 0x07),
     // PWM service
     BT_DATA_BYTES(BT_DATA_UUID16_ALL, BT_UUID_16_ENCODE(PWM_SERVICE_UUID)),
+    BT_DATA_BYTES(BT_DATA_MANUFACTURER_DATA, 0x59, 0x00, 0x00, 0x00, 0x00),
+};
+static struct bt_data sd[] = {
     // OTA service
     BT_DATA_BYTES(
         BT_DATA_UUID128_ALL,
         BT_UUID_128_ENCODE(0x8d53dc1d, 0x1db7, 0x4cd3, 0x868b, 0x8a527460aa84)),
-    BT_DATA_BYTES(BT_DATA_MANUFACTURER_DATA, 0x59, 0x00, 0x00, 0x00, 0x00),
 };
-static const struct bt_le_adv_param adv_params = BT_LE_ADV_PARAM_INIT(
-    BT_LE_ADV_OPT_CONNECTABLE, MIN_ADV_INTERVAL, MAX_ADV_INTERVAL, NULL);
+static const struct bt_le_adv_param adv_params =
+    BT_LE_ADV_PARAM_INIT(BT_LE_ADV_OPT_CONNECTABLE | BT_LE_ADV_OPT_ONE_TIME |
+                             BT_LE_ADV_OPT_USE_IDENTITY,
+                         MIN_ADV_INTERVAL, MAX_ADV_INTERVAL, NULL);
+static const struct bt_le_adv_param nconn_adv_params = BT_LE_ADV_PARAM_INIT(
+    BT_LE_ADV_OPT_USE_IDENTITY, MIN_ADV_INTERVAL, MAX_ADV_INTERVAL, NULL);
 
 static void connected(struct bt_conn *conn, uint8_t err) {
     if (err) {
@@ -299,10 +303,24 @@ static void connected(struct bt_conn *conn, uint8_t err) {
         return;
     }
     LOG_INF("Connected");
+
+    LOG_DBG("bt_le_adv_start: %d\n",
+            bt_le_adv_start(&nconn_adv_params, ad, ARRAY_SIZE(ad), sd,
+                            ARRAY_SIZE(sd)));
 }
 
+static void resume_adv_handler(struct k_work *work) {
+    bt_le_adv_start(&adv_params, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
+}
+K_WORK_DEFINE(resume_adv_work, resume_adv_handler);
 static void disconnected(struct bt_conn *conn, uint8_t reason) {
-    LOG_ERR("Disconnected (reason %u)", reason);
+    LOG_INF("Disconnected (reason %u)", reason);
+
+    LOG_DBG("bt_le_adv_stop: %d\n", bt_le_adv_stop());
+    // we cannot resume connectable advertising in this function, we use the
+    // work queue instead:
+    // https://developer.nordicsemi.com/nRF_Connect_SDK/doc/2.2.0/zephyr/connectivity/bluetooth/api/connection_mgmt.html#c.bt_conn_cb.disconnected
+    k_work_submit(&resume_adv_work);
 }
 
 static struct bt_conn_cb conn_callbacks = {
@@ -333,9 +351,9 @@ int setup_ble(void) {
     bt_id_get(&addr, NULL);
     printk("BT address: ");
     for (int i = BT_ADDR_SIZE - 1; i > 0; i--) {
-        printk("%X-", addr.a.val[i]);
+        printk("%02X:", addr.a.val[i]);
     }
-    printk("%X\n", addr.a.val[0]);
+    printk("%02X\n", addr.a.val[0]);
 
     err = bt_le_adv_start(&adv_params, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
     if (err) {
@@ -364,6 +382,6 @@ int setup_ble(void) {
 void update_adv() {
     uint16_t temp = read_ext_temp();
     uint8_t soc = read_soc();
-    sd[ARRAY_SIZE(sd) - 1].data = (uint8_t[]){0x59, 0x00, temp, temp >> 8, soc};
+    ad[ARRAY_SIZE(ad) - 1].data = (uint8_t[]){0x59, 0x00, temp, temp >> 8, soc};
     bt_le_adv_update_data(ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
 }

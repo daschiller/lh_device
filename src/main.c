@@ -16,7 +16,6 @@
 
 LOG_MODULE_REGISTER(main);
 
-#define SERIALNO "001"
 #define LOW_POWER
 #define LOG_INTERVAL 300000
 #define WDT_INTERVAL (2 * LOG_INTERVAL)
@@ -44,7 +43,7 @@ void main(void) {
     int reboot_count = -1;
 
     printk("Starting LionHearted device ...\n");
-    printk("Serial No.: " SERIALNO "\n");
+    printk("Serial No.: %03d\n", CONFIG_SERIALNO);
     printk("Build time: " __DATE__ " " __TIME__ "\n");
     printk("Reset reason: 0x%X\n", NRF_POWER->RESETREAS);
 

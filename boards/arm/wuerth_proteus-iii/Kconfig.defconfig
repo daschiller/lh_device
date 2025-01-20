@@ -12,4 +12,8 @@ config BT_CTLR
 config SOC_DCDC_NRF52X
    default y
 
+config SERIALNO
+   int "Serial number"
+   default 1
+
 endif
