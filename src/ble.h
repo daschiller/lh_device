@@ -4,6 +4,7 @@
  *  Copyright (c) 2022 David Schiller <david.schiller@jku.at>
  */
 
+#include "pwm.h"
 #include <stdint.h>
 
 #ifdef CONFIG_MCUMGR_CMD_STAT_MGMT
@@ -24,3 +25,8 @@ STATS_NAME_END(dev_stats);
 
 int setup_ble(void);
 void update_adv(void);
+struct pwm_repetitions_t {
+    unsigned int repetitions;
+    uint8_t duty_percent;
+    uint32_t timer_duration;
+};

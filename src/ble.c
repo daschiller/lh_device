@@ -6,7 +6,6 @@
 
 #include "ble.h"
 #include "battery.h"
-#include "pwm.h"
 #include "temp.h"
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/conn.h>
@@ -59,11 +58,13 @@ LOG_MODULE_REGISTER(ble);
 #define PWM_DUTY_CHAR_UUID 0xFFF1
 #define PWM_PULSE_CHAR_UUID 0xFFF2
 #define PWM_TIMER_CHAR_UUID 0xFFF3
+#define PWM_REPETITIONS_CHAR_UUID 0xFFF4
 
 #define PWM_DUTY_LOWER 0
 #define PWM_DUTY_UPPER 100
 #define PWM_PULSE_LOWER 0
 #define PWM_PULSE_UPPER PWM_PERIOD
+#define PWM_REPETITION_INTEVAL (60 * 60 * 24)
 
 static struct bt_uuid_16 pwm_service_uuid = BT_UUID_INIT_16(PWM_SERVICE_UUID);
 static const struct bt_uuid_16 pwm_duty_char_uuid =
@@ -78,19 +79,36 @@ static const struct bt_uuid_16 pwm_timer_char_uuid =
     BT_UUID_INIT_16(PWM_TIMER_CHAR_UUID);
 static const struct bt_gatt_cpf pwm_timer_char_cpf = {
     .format = CPF_FORMAT_UINT32, .unit = CPF_UNIT_S};
+static const struct bt_uuid_16 pwm_repetitions_char_uuid =
+    BT_UUID_INIT_16(PWM_REPETITIONS_CHAR_UUID);
+static const struct bt_gatt_cpf pwm_repetitions_char_cpf = {
+    .format = CPF_FORMAT_UINT32};
 static struct pwm_params_t pwm_params = {.duty_percent = 0,
                                          .pulse_length = PWM_PULSE};
 static void duty_pulse_handler(struct k_work *work) {
-    pwm_params.duty_percent = 0;
     set_duty_pulse(&pwm_params);
 }
 K_WORK_DEFINE(duty_pulse_work, duty_pulse_handler);
 static void turn_off(struct k_timer *dummy) {
     /* we need to run "set_duty_pulse" from the system work queue rather than
        the idle thread to avoid timing issues and lockups */
+    pwm_params.duty_percent = 0;
     k_work_submit(&duty_pulse_work);
 };
 static struct k_timer pwm_timer = {.expiry_fn = turn_off};
+static struct pwm_repetitions_t pwm_repetitions;
+static void repeat_pwm(struct k_timer *timer) {
+    k_timer_stop(&pwm_timer);
+    pwm_params.duty_percent = pwm_repetitions.duty_percent;
+    k_work_submit(&duty_pulse_work);
+    k_timer_start(&pwm_timer, K_MSEC(pwm_repetitions.timer_duration * 1000),
+                  K_NO_WAIT);
+    if (--pwm_repetitions.repetitions) {
+        k_timer_start(timer, K_MSEC(PWM_REPETITION_INTEVAL * 1000), K_NO_WAIT);
+    }
+    LOG_DBG("repetitions = %u", pwm_repetitions.repetitions);
+}
+static struct k_timer pwm_repetitions_timer = {.expiry_fn = repeat_pwm};
 
 static ssize_t read_duty(struct bt_conn *conn, const struct bt_gatt_attr *attr,
                          void *buf, uint16_t len, uint16_t offset) {
@@ -131,13 +149,13 @@ static ssize_t read_pulse_valid_range(struct bt_conn *conn,
 static ssize_t write_duty(struct bt_conn *conn, const struct bt_gatt_attr *attr,
                           const void *buf, uint16_t len, uint16_t offset,
                           uint8_t flags) {
-    uint16_t value;
+    uint8_t value;
 
     if (offset + len > sizeof(value)) {
         return BT_GATT_ERR(BT_ATT_ERR_INVALID_OFFSET);
     }
     memcpy(&value + offset, buf, len);
-    LOG_DBG("attribute = 0x%04X", value);
+    LOG_DBG("attribute = 0x%02X", value);
     pwm_params.duty_percent = value;
     set_duty_pulse(&pwm_params);
 
@@ -178,7 +196,42 @@ static ssize_t write_timer(struct bt_conn *conn,
     memcpy(&value + offset, buf, len);
     k_timer_stop(&pwm_timer);
     k_timer_start(&pwm_timer, K_MSEC(value * 1000), K_NO_WAIT);
+    if (pwm_repetitions.repetitions > 0) {
+        pwm_repetitions.duty_percent = pwm_params.duty_percent;
+        pwm_repetitions.timer_duration = value;
+        k_timer_start(&pwm_repetitions_timer,
+                      K_MSEC(PWM_REPETITION_INTEVAL * 1000), K_NO_WAIT);
+    }
     LOG_DBG("attribute = 0x%04X", value);
+
+    return len;
+};
+
+static ssize_t read_repetitions(struct bt_conn *conn,
+                                const struct bt_gatt_attr *attr, void *buf,
+                                uint16_t len, uint16_t offset) {
+    uint32_t value;
+
+    value = pwm_repetitions.repetitions;
+    LOG_DBG("repetitions = 0x%04X", value);
+    return bt_gatt_attr_read(conn, attr, buf, sizeof(value), 0, &value,
+                             sizeof(value));
+};
+static ssize_t write_repetitions(struct bt_conn *conn,
+                                 const struct bt_gatt_attr *attr,
+                                 const void *buf, uint16_t len, uint16_t offset,
+                                 uint8_t flags) {
+    uint32_t value;
+
+    if (offset + len > sizeof(value)) {
+        return BT_GATT_ERR(BT_ATT_ERR_INVALID_OFFSET);
+    }
+    memcpy(&value + offset, buf, len);
+    LOG_DBG("repetitions = 0x%04X", value);
+    pwm_repetitions.repetitions = value;
+    if (pwm_repetitions.repetitions == 0) {
+        k_timer_stop(&pwm_repetitions_timer);
+    }
 
     return len;
 };
@@ -206,7 +259,13 @@ BT_GATT_SERVICE_DEFINE(
                            BT_GATT_PERM_READ | BT_GATT_PERM_WRITE, read_timer,
                            write_timer, NULL),
     BT_GATT_CUD("PWM timer", BT_GATT_PERM_READ),
-    BT_GATT_CPF(&pwm_timer_char_cpf), );
+    BT_GATT_CPF(&pwm_timer_char_cpf),
+    BT_GATT_CHARACTERISTIC(&pwm_repetitions_char_uuid.uuid,
+                           BT_GATT_CHRC_READ | BT_GATT_CHRC_WRITE,
+                           BT_GATT_PERM_READ | BT_GATT_PERM_WRITE,
+                           read_repetitions, write_repetitions, NULL),
+    BT_GATT_CUD("PWM repetitions", BT_GATT_PERM_READ),
+    BT_GATT_CPF(&pwm_repetitions_char_cpf), );
 
 // SENSORS
 #define SENSOR_SERVICE_UUID 0xFFE0
