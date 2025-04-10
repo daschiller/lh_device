@@ -1,3 +1,5 @@
+![Example board](render.png)
+
 Zephyr project for a Bluetooth-controlled PWM LED controller and temperature
 sensor running on battery power. Designed to work with Wuerth Proteus-III
 nRF52840 modules.
